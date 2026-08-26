@@ -236,6 +236,13 @@ def owner_from_auth_tags(auth_tags: list) -> str:
     return ""
 
 
+def owner_auth_tag(owner: str) -> str:
+    owner = (owner or "").lower()
+    if not PUBKEY_RE.match(owner):
+        raise ValueError("invalid owner pubkey")
+    return json.dumps(["auth", owner])
+
+
 def tag_value(tags: list, name: str) -> str:
     for t in tags or []:
         if isinstance(t, list) and len(t) >= 2 and t[0] == name:

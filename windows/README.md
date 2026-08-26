@@ -1,6 +1,6 @@
 # Windows (Buzz Desktop)
 
-This PC is the **identity store and control plane**, not the agent runtime. Goose runs on Cloud Run. These scripts put a PATH plugin in Desktop and keep agent cards in sync with the GCP listener.
+This PC is the **Desktop GUI and identity replica**, not the agent runtime. Goose runs on Cloud Run. Chat-confirmed creates mint `nsec` on the listener; the sidecar imports the card. These scripts put a PATH plugin in Desktop and keep agent cards in sync with the GCP listener.
 
 Requires CPython (`python.exe` not the Windows Store alias), `gcloud` on PATH, and Buzz Desktop. On a Mac, use [`macos/`](../macos/README.md) instead.
 

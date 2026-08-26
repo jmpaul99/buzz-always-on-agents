@@ -1,6 +1,6 @@
 # buzz-always-on-agents (GCP)
 
-Cloud-hosted Buzz agents. **Buzz Desktop is the human client and identity store only** — Goose, Chromium, and the LLM router run on GCP. Mentions on the community relay (`BUZZ_RELAY_URL`) wake a Cloud Run worker; the worker replies through `buzz` on that same relay.
+Cloud-hosted Buzz agents. **Buzz Desktop is the human client**; identity (`nsec`) is minted in Desktop Save or on the listener after a chat confirm. Goose, Chromium, and the LLM router run on GCP. Mentions on the community relay (`BUZZ_RELAY_URL`) wake a Cloud Run worker; the worker replies through `buzz` on that same relay.
 
 Do not commit nsecs, gcloud tokens, Stripe/GitHub/Google secrets, ADC JSON, `.env`, or `infra/config.env`.
 
@@ -30,7 +30,7 @@ SSH to the micro is **IAP only**:
 gcloud compute ssh buzz-listener --zone us-central1-a --tunnel-through-iap
 ```
 
-Do not open `0.0.0.0/0:22`. The listener control API binds `0.0.0.0:8743`, but the firewall allows **IAP (`35.235.240.0/20`) only** — never `0.0.0.0/0:8743`.
+Do not open `0.0.0.0/0:22`. The listener control API binds `0.0.0.0:8743`, but the firewall allows **IAP (`35.235.240.0/20`)** and the **default subnet** (Cloud Run Direct VPC) — never `0.0.0.0/0:8743`.
 
 ## Mention path
 
@@ -45,7 +45,7 @@ Schedules are ordinary Buzz YAML `on: schedule` posts that `@` an agent. The lis
 
 ## Desktop ↔ cloud sync
 
-Agent **identity** (`nsec`) is created in Buzz Desktop. While this computer is online, a silent sidecar keeps Desktop cards and `/etc/buzz/*.env` in sync. **Every Desktop with the sidecar shares an access-filtered roster:** create on one machine is imported (card + nsec) on others where this Buzz user owns the agent, is on its allowlist, or anyone can message it. Delete on one machine undeploys GCP and drops the card everywhere it was synced.
+Agent **identity** (`nsec`) is minted in Buzz Desktop (Save) **or** on the listener after a chat confirm (`buzz-cloud-agents apply`). While this computer is online, a silent sidecar keeps Desktop cards and `/etc/buzz/*.env` in sync. Chat-created agents are live on GCP immediately; the sidecar imports the card + nsec (no Desktop Save). **Every Desktop with the sidecar shares an access-filtered roster:** create on one machine (or in chat) is imported on others where this Buzz user owns the agent, is on its allowlist, or anyone can message it. Delete on one machine undeploys GCP and drops the card everywhere it was synced.
 
 | Syncs (sidecar PUT/GET) | Relay-native (no sidecar JSON) | Does not sync |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ Open agent cards may not redraw until you reopen them (or restart Desktop); the 
 | Path | Purpose |
 | --- | --- |
 | [`deploy.ps1`](deploy.ps1) | One command: auth, secrets, GCP stack, Windows Desktop plugin |
-| [`listener/`](listener/README.md) | Always-on WSS client, hot-reload, IAP-only control API, `add-agent.sh` / `remove-agent.sh` |
+| [`listener/`](listener/README.md) | Always-on WSS client, hot-reload, IAP + Direct VPC control API, `add-agent.sh` / `remove-agent.sh` |
 | [`goose-job/`](goose-job/README.md) | Goose + sprig/`buzz` + Playwright image for the Cloud Run worker |
 | [`litellm/`](litellm/README.md) | Complexity auto-router image (NIM / Groq / Gemini / OpenRouter) |
 | [`goose/`](goose/README.md) | Goose `config.yaml`, hints, guardrails, recipes, [extension logins](goose/README.md#extension-logins) |
@@ -164,7 +164,7 @@ A daily systemd timer (`buzz-keepalive`) burns a little CPU and outbound traffic
 ## Security
 
 - nsecs live in Desktop Credential Manager (Windows) or Keychain (macOS), and in `/etc/buzz/*.env` (mode 600). Logs redact nsecs and provider keys.
-- Control API and SSH are IAP-range only. Auth is a bearer token in `/etc/buzz/_sync.token`.
+- Control API and SSH are not public (`0.0.0.0/0`). Auth is a sidecar bearer token in `/etc/buzz/_sync.token` or a Goose SA ID token for chat apply (POST/PUT only).
 - Goose worker and LiteLLM are `--no-allow-unauthenticated`. The listener mints an identity token for `GOOSE_WORKER_URL`; the worker sidecar mints one for LiteLLM.
 - Files named `_*.env` (including `_sync.token`) are not loaded as agents.
 

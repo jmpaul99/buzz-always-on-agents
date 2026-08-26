@@ -23,7 +23,9 @@ class GuardrailsTest(unittest.TestCase):
         self.assertIn("buzz messages send", GUARDRAILS)
         self.assertIn("buzz --help", GUARDRAILS)
         self.assertIn("buzz mem", GUARDRAILS)
+        self.assertIn("buzz-cloud-agents", GUARDRAILS)
         self.assertIn("draft-create", GUARDRAILS)
+        self.assertIn("no desktop save", GUARDRAILS)
         self.assertIn("no goose memory extension", GUARDRAILS)
 
 
@@ -36,6 +38,7 @@ class GoosehintsTest(unittest.TestCase):
         self.assertIn("/mnt/buzz", HINTS)
         self.assertIn("channels/", HINTS)
         self.assertIn("buzz --help", HINTS)
+        self.assertIn("buzz-cloud-agents", HINTS)
         self.assertIn("draft-create", HINTS)
         self.assertNotIn("5 enabled extensions", HINTS)
         self.assertNotIn("search_available_extensions", HINTS)

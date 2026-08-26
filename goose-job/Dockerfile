@@ -42,7 +42,7 @@ RUN mkdir -p /opt/goose /tmp/goose && cd /tmp/goose \
     && ln -sfn /opt/goose/goose /usr/local/bin/goose \
     && rm -rf /tmp/goose
 
-COPY goose-job/litellm_proxy.py goose-job/entrypoint.sh goose-job/worker.py goose-job/agenthome.py goose-job/nip44.py goose-job/observer.py goose-job/activity.py goose-job/memory.py /app/
+COPY goose-job/litellm_proxy.py goose-job/entrypoint.sh goose-job/worker.py goose-job/agenthome.py goose-job/nip44.py goose-job/observer.py goose-job/activity.py goose-job/memory.py goose-job/cloud_agents.py /app/
 COPY listener/nostrutil.py /app/nostrutil.py
 RUN mkdir -p /home/goose/.config/goose /home/goose/.config/gcloud /opt/buzz/local-mcp /home/goose/recipes
 COPY goose/config.yaml /home/goose/.config/goose/config.yaml
@@ -57,8 +57,9 @@ ENV GOOSE_RECIPE_PATH=/home/goose/recipes
 RUN pip3 install --break-system-packages --no-cache-dir \
       'google-auth==2.40.3' 'requests==2.32.5' \
       'websockets==15.0.1' 'bech32==1.2.0' 'coincurve==21.0.0' 'cryptography==44.0.2' \
-    && sed -i 's/\r$//' /app/entrypoint.sh \
-    && chmod +x /app/entrypoint.sh \
+    && sed -i 's/\r$//' /app/entrypoint.sh /app/cloud_agents.py \
+    && chmod +x /app/entrypoint.sh /app/cloud_agents.py \
+    && ln -sfn /app/cloud_agents.py /usr/local/bin/buzz-cloud-agents \
     && chown -R goose:goose /home/goose /app /opt/buzz
 
 USER goose

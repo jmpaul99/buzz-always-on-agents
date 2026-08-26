@@ -4,11 +4,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import time
 import uuid
 from typing import Any
 
-from bech32 import bech32_decode, convertbits
+from bech32 import bech32_decode, bech32_encode, convertbits
 from coincurve import PrivateKey
 
 
@@ -31,6 +32,24 @@ def pubkey_hex(secret: bytes) -> str:
     pk = PrivateKey(secret)
     compressed = pk.public_key.format(compressed=True)
     return compressed[1:].hex()
+
+
+def secret_to_nsec(secret: bytes) -> str:
+    if len(secret) != 32:
+        raise ValueError("secret must be 32 bytes")
+    data = convertbits(list(secret), 8, 5, True)
+    if data is None:
+        raise ValueError("bech32 convert failed")
+    encoded = bech32_encode("nsec", data)
+    if not encoded:
+        raise ValueError("bech32 encode failed")
+    return encoded
+
+
+def generate_nsec() -> tuple[str, str]:
+    """Return (nsec1…, hex pubkey). Never log the nsec."""
+    secret = os.urandom(32)
+    return secret_to_nsec(secret), pubkey_hex(secret)
 
 
 def _serialize(pubkey: str, created_at: int, kind: int, tags: list, content: str) -> bytes:

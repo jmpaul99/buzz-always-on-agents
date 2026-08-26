@@ -57,16 +57,19 @@ Slug: `[a-z0-9][a-z0-9-]{0,31}`. If the display-name slug is already another pub
 
 ## Control API (`0.0.0.0:8743`)
 
-Firewall: IAP range `35.235.240.0/20` only (`allow-iap-8743`). Token: `/etc/buzz/_sync.token` (`Authorization: Bearer …` or `X-Buzz-Sync-Token`). Unauthenticated `/health` and `/healthz` return `{"ok":true}`.
+Firewall: IAP range `35.235.240.0/20` (`allow-iap-8743`) plus the default subnet (`allow-goose-worker-8743`) so Cloud Run Direct VPC can apply chat-confirmed creates/updates. Sidecar token: `/etc/buzz/_sync.token` (`Authorization: Bearer …` or `X-Buzz-Sync-Token`). Goose worker: Google ID token from `GOOSE_WORKER_SA` with audience `WORKER_APPLY_AUDIENCE` / `LISTENER_CONTROL_URL`. Unauthenticated `/health` and `/healthz` return `{"ok":true}`.
 
 | Method | Path | Body / result |
 | --- | --- | --- |
 | `GET` | `/health`, `/healthz` | `{"ok":true}` (no auth) |
-| `GET` | `/agents` | Roster for Desktop sync: slug, pubkey, display, prompt, permissions, `owner`, `updated_at`, `nsec`, `auth_tag`, `team_instructions`. Auth required. Never log the body. Sidecars import only agents this Desktop user can access. |
-| `PUT` | `/agents/{pubkey}` | Upsert. `nsec` required on create; omitted on update keeps the existing key. `nsec` must match `{pubkey}`. |
-| `DELETE` | `/agents/{pubkey}` | Removes `.env`, `.instructions`, and `.team`. Idempotent. |
+| `GET` | `/agents` | Roster for Desktop sync: slug, pubkey, display, prompt, permissions, `owner`, `updated_at`, `nsec`, `auth_tag`, `team_instructions`. **Sidecar token only** (never the Goose ID token). Never log the body. Sidecars import only agents this Desktop user can access. |
+| `POST` | `/agents` | Worker apply create. Mints nsec, owner-only, `auth_tag` owner = confirming human. Goose ID token. Body: `author_pubkey`, `actor_slug` or `actor_pubkey`, `name`, `system_prompt`. Returns `{ok, agent_id, pubkey}` (no nsec). |
+| `PUT` | `/agents/{pubkey}` | Sidecar upsert **or** worker apply update. Sidecar: `nsec` required on create; omitted on update keeps the existing key. Worker: owner-gated; cannot set `nsec`; forces `updated_at` now. |
+| `DELETE` | `/agents/{pubkey}` | Sidecar token. Removes `.env`, `.instructions`, and `.team`. Idempotent. |
 
-PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_prompt`, `respond_to`, `respond_to_allowlist`, `team_id`, `team_instructions`, `auth_tag`, `relay_url` / `relay`, `updated_at`, `channel_allowlist`. Payload cap 512 KiB.
+Sidecar PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_prompt`, `respond_to`, `respond_to_allowlist`, `team_id`, `team_instructions`, `auth_tag`, `relay_url` / `relay`, `updated_at`, `channel_allowlist`. Payload cap 512 KiB.
+
+Worker apply is owner-only: the mention author must own the actor agent (and the target on update). New chat-created agents default to `respond_to=owner-only`.
 
 Hot-reload watches the env files; PUT/DELETE do not restart systemd. Redeploy the listener for Desktop roster import (`nsec` on GET `/agents`).
 

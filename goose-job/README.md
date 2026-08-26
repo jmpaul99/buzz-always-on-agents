@@ -113,6 +113,7 @@ Goose’s LiteLLM client is non-streaming: it POSTs and waits for one JSON body.
 | `agenthome.py` | Copy config into isolated HOME |
 | `activity.py` | Stdout → observer events + redact (`--help` is shown; env dumps are not) |
 | `memory.py` | `buzz mem get core` plus canvas/huddle/recent channel or thread/team/workspace → `tom.md` |
+| `cloud_agents.py` | `buzz-cloud-agents` propose/apply/cancel (chat confirm → listener mint/update) |
 | `observer.py` | Kind 24200 WSS publisher |
 | `nip44.py` | NIP-44 v2 encrypt for observer payloads |
 | `litellm_proxy.py` | Localhost → Cloud Run LiteLLM |
@@ -121,7 +122,7 @@ Goose’s LiteLLM client is non-streaming: it POSTs and waits for one JSON body.
 
 ## Deploy knobs
 
-Set in [`infra/deploy-goose-job.ps1`](../infra/deploy-goose-job.ps1): 2 vCPU / 4 Gi, min 0, max 1, concurrency 16, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`. GCS workspace bucket mounted at `/mnt/buzz`. Secrets: LiteLLM master, Gemini/Groq/NIM, optional GitHub/Tavily/Stripe, optional ADC JSON at `/secrets/adc.json`.
+Set in [`infra/deploy-goose-job.ps1`](../infra/deploy-goose-job.ps1): 2 vCPU / 4 Gi, min 0, max 1, concurrency 16, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`, Direct VPC to the default subnet. GCS workspace bucket mounted at `/mnt/buzz`. `LISTENER_CONTROL_URL` is set once the listener VM exists. Secrets: LiteLLM master, Gemini/Groq/NIM, optional GitHub/Tavily/Stripe, optional ADC JSON at `/secrets/adc.json`.
 
 ## Tests
 
@@ -131,4 +132,4 @@ From the repo root:
 python -m unittest discover -s tests/goose-job
 ```
 
-No Docker/GCP. Cover HOME sync, recipe argv, activity parsing/redaction, guardrail copy, and proxy stream/tool-name rewrites.
+No Docker/GCP. Cover HOME sync, recipe argv, activity parsing/redaction, guardrail copy, proxy stream/tool-name rewrites, and `buzz-cloud-agents` propose/apply.

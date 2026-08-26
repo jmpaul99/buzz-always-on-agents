@@ -41,6 +41,7 @@ $litellmEmail = "$($C.LITELLM_SA)@$Project.iam.gserviceaccount.com"
 $user = (& gcloud config get-value account).Trim()
 
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$gooseEmail" --role="roles/run.invoker" --quiet --condition=None
+Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$gooseEmail" --role="roles/compute.networkUser" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$litellmEmail" --role="roles/secretmanager.secretAccessor" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$gooseEmail" --role="roles/secretmanager.secretAccessor" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="user:$user" --role="roles/iap.tunnelResourceAccessor" --quiet --condition=None
@@ -57,6 +58,15 @@ if ($LASTEXITCODE -ne 0) {
     Invoke-Gcloud compute firewall-rules create allow-iap-8743 --project $Project `
         --allow=tcp:8743 --source-ranges=35.235.240.0/20 --target-tags=$($C.IAP_TAG) `
         --description="IAP TCP tunnel to listener control API"
+}
+$subnetCidr = (& gcloud compute networks subnets describe default --region $Region --project $Project --format="value(ipCidrRange)" 2>$null).Trim()
+if ($subnetCidr) {
+    & gcloud compute firewall-rules describe allow-goose-worker-8743 --project $Project 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Invoke-Gcloud compute firewall-rules create allow-goose-worker-8743 --project $Project `
+            --allow=tcp:8743 --source-ranges=$subnetCidr --target-tags=$($C.IAP_TAG) `
+            --description="Cloud Run Direct VPC to listener control API"
+    }
 }
 & gcloud compute firewall-rules describe default-allow-ssh --project $Project 1>$null 2>$null
 if ($LASTEXITCODE -eq 0) {

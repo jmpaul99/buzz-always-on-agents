@@ -7,7 +7,9 @@ On matching events, add 👀/💬 reactions and a typing heartbeat, POST to the
 Goose Cloud Run service, then retract the reactions. Never prints nsecs.
 
 Hot-reloads /etc/buzz/*.env without restarting the process. Token-auth control
-API on BUZZ_CONTROL_HOST:BUZZ_CONTROL_PORT (default 0.0.0.0:8743; firewall IAP range only).
+API on BUZZ_CONTROL_HOST:BUZZ_CONTROL_PORT (default 0.0.0.0:8743; firewall IAP
+range plus Cloud Run Direct VPC). Sidecar uses `_sync.token`; Goose apply uses
+a Google ID token from the goose-job SA (POST/PUT only — never GET /agents).
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ import websockets
 import agentutil as au
 import taskmcp
 from nostrutil import (
+    generate_nsec,
     nip42_auth_event,
     nip98_authorization,
     nsec_to_secret,
@@ -49,6 +52,12 @@ GOOSE_WORKER_URL = os.environ.get("GOOSE_WORKER_URL", "").rstrip("/")
 GOOSE_WORKER_TIMEOUT = int(os.environ.get("GOOSE_WORKER_TIMEOUT", "1620"))
 CONTROL_HOST = os.environ.get("BUZZ_CONTROL_HOST", "0.0.0.0")
 CONTROL_PORT = int(os.environ.get("BUZZ_CONTROL_PORT", "8743"))
+GOOSE_WORKER_SA = (os.environ.get("GOOSE_WORKER_SA") or "").strip().lower()
+WORKER_APPLY_AUDIENCE = (
+    os.environ.get("WORKER_APPLY_AUDIENCE") or os.environ.get("LISTENER_CONTROL_URL") or ""
+).strip()
+# Tests assign a callable(token) -> bool. Production uses Google ID tokens.
+_worker_token_checker = None
 CHAT_KINDS = au.CHAT_KINDS
 MEMBER_KIND = au.MEMBER_KIND
 META_KIND = au.META_KIND
@@ -653,6 +662,140 @@ def _existing_nsec(pubkey: str) -> tuple[str, str | None]:
     return env.get("BUZZ_PRIVATE_KEY", ""), path.stem
 
 
+class ApplyAuthError(Exception):
+    """Owner/actor check failed for a worker apply."""
+
+
+def _agent_from_env_path(path: pathlib.Path) -> dict[str, Any] | None:
+    env = au.load_env_file(path)
+    nsec = env.get("BUZZ_PRIVATE_KEY") or ""
+    declared = (env.get("BUZZ_PUBKEY") or "").lower()
+    derived = ""
+    if nsec:
+        try:
+            derived = pubkey_hex(nsec_to_secret(nsec))
+        except ValueError:
+            derived = ""
+    pubkey = derived or declared
+    if not au.PUBKEY_RE.match(pubkey):
+        return None
+    return au.parse_loaded_agent(path, env, pubkey)
+
+
+def load_agent_record(*, pubkey: str = "", slug: str = "") -> dict[str, Any] | None:
+    path = None
+    if au.PUBKEY_RE.match((pubkey or "").lower()):
+        path = find_agent_path(pubkey)
+    elif slug:
+        candidate = AGENTS_DIR / f"{au.slug_name(slug)}.env"
+        if candidate.is_file():
+            path = candidate
+    if path is None:
+        return None
+    return _agent_from_env_path(path)
+
+
+def worker_token_ok(token: str) -> bool:
+    if _worker_token_checker is not None:
+        return bool(_worker_token_checker(token))
+    email = (os.environ.get("GOOSE_WORKER_SA") or GOOSE_WORKER_SA or "").strip().lower()
+    audience = (
+        os.environ.get("WORKER_APPLY_AUDIENCE")
+        or os.environ.get("LISTENER_CONTROL_URL")
+        or WORKER_APPLY_AUDIENCE
+        or ""
+    ).strip()
+    if not token or not email or not audience:
+        return False
+    try:
+        from google.auth.transport import requests as greq
+        from google.oauth2 import id_token
+
+        info = id_token.verify_oauth2_token(token, greq.Request(), audience=audience)
+    except Exception:
+        return False
+    got = str(info.get("email") or "").strip().lower()
+    return got == email
+
+
+def _require_owner_actor(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    author = str(body.get("author_pubkey") or "").strip().lower()
+    if not au.PUBKEY_RE.match(author):
+        raise ValueError("author_pubkey required")
+    actor_pk = str(body.get("actor_pubkey") or "").strip().lower()
+    actor_slug = str(body.get("actor_slug") or body.get("actor") or "").strip()
+    actor = None
+    if au.PUBKEY_RE.match(actor_pk):
+        actor = load_agent_record(pubkey=actor_pk)
+    if actor is None and actor_slug:
+        actor = load_agent_record(slug=actor_slug)
+    if actor is None:
+        raise ValueError("actor agent not found")
+    owner = str(actor.get("owner") or "").strip().lower()
+    if owner != author:
+        raise ApplyAuthError("author is not the actor owner")
+    return author, actor
+
+
+def worker_apply_create(body: dict[str, Any]) -> dict[str, Any]:
+    author, _actor = _require_owner_actor(body)
+    display = str(body.get("name") or body.get("display") or "").strip() or "agent"
+    prompt = body.get("system_prompt")
+    if prompt is None:
+        raise ValueError("system_prompt required")
+    nsec, pubkey = generate_nsec()
+    result = upsert_from_api(
+        pubkey,
+        {
+            "nsec": nsec,
+            "name": display,
+            "slug": str(body.get("slug") or display),
+            "system_prompt": str(prompt),
+            "respond_to": "owner-only",
+            "auth_tag": au.owner_auth_tag(author),
+            "relay_url": str(body.get("relay_url") or body.get("relay") or RELAY_URL),
+            "updated_at": au.utc_now(),
+        },
+    )
+    return result
+
+
+def worker_apply_update(pubkey: str, body: dict[str, Any]) -> dict[str, Any]:
+    if body.get("nsec") or body.get("private_key_nsec"):
+        raise ValueError("worker apply cannot set nsec")
+    author, _actor = _require_owner_actor(body)
+    pubkey = (pubkey or "").lower()
+    path = find_agent_path(pubkey)
+    if path is None:
+        raise ValueError("agent not found")
+    rec = _agent_from_env_path(path)
+    if rec is None:
+        raise ValueError("agent not found")
+    target_owner = str(rec.get("owner") or "").strip().lower()
+    if target_owner != author:
+        raise ApplyAuthError("author is not the target owner")
+    display = str(body.get("name") or body.get("display") or rec.get("display") or path.stem)
+    if "system_prompt" in body:
+        prompt: str | None = str(body.get("system_prompt") or "")
+    else:
+        prompt = au.load_instructions(AGENTS_DIR, path.stem)
+    return upsert_from_api(
+        pubkey,
+        {
+            "name": display,
+            "slug": rec.get("name") or path.stem,
+            "system_prompt": prompt,
+            "respond_to": rec.get("respond_to") or "owner-only",
+            "respond_to_allowlist": rec.get("respond_to_allowlist") or [],
+            "team_id": rec.get("team_id") or "",
+            "auth_tag": rec.get("auth_tag_raw") or "",
+            "relay_url": rec.get("relay") or RELAY_URL,
+            "channel_allowlist": rec.get("channel_allowlist") or [],
+            "updated_at": au.utc_now(),
+        },
+    )
+
+
 def upsert_from_api(pubkey: str, body: dict[str, Any]) -> dict[str, Any]:
     pubkey = (pubkey or "").lower()
     if not au.PUBKEY_RE.match(pubkey):
@@ -724,14 +867,50 @@ class ControlHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _auth(self) -> bool:
+    def _bearer(self) -> str:
         header = self.headers.get("Authorization") or ""
-        token = ""
         if header.lower().startswith("bearer "):
-            token = header[7:].strip()
-        if not token:
-            token = (self.headers.get("X-Buzz-Sync-Token") or "").strip()
+            return header[7:].strip()
+        return (self.headers.get("X-Buzz-Sync-Token") or "").strip()
+
+    def _auth(self) -> bool:
+        token = self._bearer()
         return bool(self.token) and token == self.token
+
+    def _worker_auth(self) -> bool:
+        header = self.headers.get("Authorization") or ""
+        if not header.lower().startswith("bearer "):
+            return False
+        token = header[7:].strip()
+        if not token or (self.token and token == self.token):
+            return False
+        return worker_token_ok(token)
+
+    def _read_json(self) -> dict[str, Any] | None:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 512_000:
+            self._send(413, {"ok": False, "error": "payload too large"})
+            return None
+        try:
+            body = json.loads(self.rfile.read(length) if length else b"{}")
+        except json.JSONDecodeError:
+            self._send(400, {"ok": False, "error": "invalid json"})
+            return None
+        if not isinstance(body, dict):
+            self._send(400, {"ok": False, "error": "invalid json"})
+            return None
+        return body
+
+    def _send_apply(self, fn, *args) -> None:
+        try:
+            self._send(200, fn(*args))
+        except ApplyAuthError as exc:
+            self._send(403, {"ok": False, "error": str(exc)})
+        except ValueError as exc:
+            self._send(400, {"ok": False, "error": str(exc)})
+        except Exception:
+            log.exception("worker apply failed")
+            self._send(500, {"ok": False, "error": "internal"})
 
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
@@ -746,27 +925,36 @@ class ControlHandler(BaseHTTPRequestHandler):
             return
         self._send(404, {"ok": False, "error": "not found"})
 
-    def do_PUT(self) -> None:  # noqa: N802
-        if not self._auth():
+    def do_POST(self) -> None:  # noqa: N802
+        path = self.path.split("?", 1)[0]
+        if path != "/agents":
+            self._send(404, {"ok": False, "error": "not found"})
+            return
+        if not self._worker_auth():
             self._send(401, {"ok": False, "error": "unauthorized"})
             return
+        body = self._read_json()
+        if body is None:
+            return
+        self._send_apply(worker_apply_create, body)
+
+    def do_PUT(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
         prefix = "/agents/"
         if not path.startswith(prefix):
             self._send(404, {"ok": False, "error": "not found"})
             return
         pubkey = path[len(prefix) :].strip().lower()
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > 512_000:
-            self._send(413, {"ok": False, "error": "payload too large"})
+        sync = self._auth()
+        worker = False if sync else self._worker_auth()
+        if not sync and not worker:
+            self._send(401, {"ok": False, "error": "unauthorized"})
             return
-        try:
-            body = json.loads(self.rfile.read(length) if length else b"{}")
-        except json.JSONDecodeError:
-            self._send(400, {"ok": False, "error": "invalid json"})
+        body = self._read_json()
+        if body is None:
             return
-        if not isinstance(body, dict):
-            self._send(400, {"ok": False, "error": "invalid json"})
+        if worker:
+            self._send_apply(worker_apply_update, pubkey, body)
             return
         try:
             self._send(200, upsert_from_api(pubkey, body))

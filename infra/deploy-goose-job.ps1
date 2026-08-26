@@ -64,6 +64,43 @@ sys.stdout.write(text)
     Invoke-Gcloud run services replace $yaml --project $Project --region $Region --quiet
 }
 
+function Set-GooseDirectVpc([string]$Service) {
+    $export = & gcloud run services describe $Service --project $Project --region $Region --format=export
+    if ($LASTEXITCODE -ne 0) { throw "gcloud run services describe $Service failed" }
+    $py = Join-Path $env:TEMP "buzz-attach-vpc.py"
+    @'
+import sys
+text = sys.stdin.read()
+project, region = sys.argv[1], sys.argv[2]
+needle = "run.googleapis.com/network-interfaces:"
+if needle not in text:
+    iface = (
+        '[{"network":"projects/%s/global/networks/default",'
+        '"subnetwork":"projects/%s/regions/%s/subnetworks/default"}]'
+        % (project, project, region)
+    )
+    insert = (
+        "        run.googleapis.com/network-interfaces: '%s'\n"
+        "        run.googleapis.com/vpc-access-egress: private-ranges-only\n"
+        % iface
+    )
+    key = "        run.googleapis.com/execution-environment: gen2\n"
+    if key in text:
+        text = text.replace(key, key + insert, 1)
+    else:
+        boost = "        run.googleapis.com/startup-cpu-boost: 'true'\n"
+        if boost not in text:
+            raise SystemExit("could not set Direct VPC annotations")
+        text = text.replace(boost, boost + insert, 1)
+sys.stdout.write(text)
+'@ | Set-Content -LiteralPath $py -Encoding utf8
+    $patched = $export | python $py $Project $Region
+    if ($LASTEXITCODE -ne 0) { throw "failed to patch goose-worker YAML for Direct VPC" }
+    $yaml = Join-Path $env:TEMP "buzz-goose-worker-vpc.yaml"
+    Set-Content -LiteralPath $yaml -Value $patched -Encoding utf8
+    Invoke-Gcloud run services replace $yaml --project $Project --region $Region --quiet
+}
+
 Invoke-Gcloud config set project $Project --quiet
 Write-Host "building $image (Playwright + Goose; several minutes)"
 Invoke-Gcloud builds submit $Root --project $Project --config $cb --substitutions="_IMAGE=$image" --quiet --timeout=1800
@@ -82,6 +119,10 @@ if (Test-Secret "github-pat") { $secretParts += "GITHUB_PERSONAL_ACCESS_TOKEN=gi
 if (Test-Secret "tavily-api-key") { $secretParts += "TAVILY_API_KEY=tavily-api-key:latest" }
 if (Test-Secret "stripe-api-key") { $secretParts += "STRIPE_API_KEY=stripe-api-key:latest" }
 $envVars = "LITELLM_URL=$litellmUrl,LITELLM_AUDIENCE=$litellmUrl,GOOSE_PROVIDER=litellm,GOOSE_MODEL=goose,GOOSE_DISABLE_KEYRING=1,GOOSE_DISABLE_SESSION_NAMING=true,GOOGLE_CLOUD_PROJECT=$Project,GOOSE_MAX_PARALLEL=2,GOOSE_TIMEOUT_SECS=1500,GOOSE_IDLE_TIMEOUT_SECS=180,BUZZ_WORKSPACE=/mnt/buzz"
+$internalIp = (& gcloud compute instances describe $C.LISTENER_INSTANCE --project $Project --zone $Zone --format="value(networkInterfaces[0].networkIP)" 2>$null).Trim()
+if ($internalIp) {
+    $envVars += ",LISTENER_CONTROL_URL=http://${internalIp}:8743"
+}
 if (Test-Secret "gcloud-adc") {
     $secretParts += "/secrets/adc.json=gcloud-adc:latest"
     $envVars += ",GOOGLE_APPLICATION_CREDENTIALS=/secrets/adc.json"
@@ -136,6 +177,14 @@ if ($help -match "--add-volume") {
         --set-env-vars $envVars `
         --set-secrets ($secretParts -join ",")
     Set-GooseGcsVolume $svc $bucket
+}
+if ($help -match "--network") {
+    Write-Host "attaching Direct VPC egress to default subnet"
+    Invoke-Gcloud run services update $svc --project $Project --region $Region `
+        --network=default --subnet=default --vpc-egress=private-ranges-only --quiet
+} else {
+    Write-Host "gcloud has no --network; attaching Direct VPC via services replace"
+    Set-GooseDirectVpc $svc
 }
 Invoke-Gcloud run services add-iam-policy-binding $svc --project $Project --region $Region `
     --member="serviceAccount:$listenerEmail" --role="roles/run.invoker" --quiet

@@ -43,8 +43,11 @@ dms       list / get
 users     get / search
 huddle    get (owner-signed guidelines for this channel)
 workflows / feed / social / repos / issues / pr / upload / projects
-agents    draft-create / draft-update - never claim the agent exists until
-          the owner saves it in Desktop
+agents    buzz-cloud-agents propose / apply / cancel
+          two-turn chat confirm: propose full instructions, ask the owner
+          to reply confirm (or cancel), then apply. Never use
+          buzz agents draft-create / draft-update. After apply the agent
+          is live (no Desktop Save).
 
 Core memory is already in Top of Mind when the [Agent Memory - core] section
 is present. Follow it unless the user overrides. Keep core small (~10 KB);

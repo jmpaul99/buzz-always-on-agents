@@ -33,6 +33,16 @@ if ($LASTEXITCODE -ne 0) {
         --allow=tcp:8743 --source-ranges=35.235.240.0/20 --target-tags=$($C.IAP_TAG) `
         --description="IAP TCP tunnel to listener control API"
 }
+$subnetCidr = (& gcloud compute networks subnets describe default --region $Region --project $Project --format="value(ipCidrRange)" 2>$null).Trim()
+if ($subnetCidr) {
+    & gcloud compute firewall-rules describe allow-goose-worker-8743 --project $Project 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "creating allow-goose-worker-8743 (Direct VPC to listener)"
+        Invoke-Gcloud compute firewall-rules create allow-goose-worker-8743 --project $Project `
+            --allow=tcp:8743 --source-ranges=$subnetCidr --target-tags=$($C.IAP_TAG) `
+            --description="Cloud Run Direct VPC to listener control API"
+    }
+}
 
 $tmp = "/tmp/buzz-listener-src"
 & gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "rm -rf $tmp && mkdir -p $tmp"
@@ -86,14 +96,26 @@ Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $
 Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo bash /tmp/install-listener.sh"
 
 $workerUrl = (& gcloud run services describe $C.GOOSE_SERVICE --project $Project --region $Region --format="value(status.url)").Trim()
+$internalIp = (& gcloud compute instances describe $inst --project $Project --zone $Zone --format="value(networkInterfaces[0].networkIP)").Trim()
+$gooseSa = "$($C.GOOSE_SA)@$Project.iam.gserviceaccount.com"
+$controlUrl = ""
+if ($internalIp) { $controlUrl = "http://${internalIp}:8743" }
 if ($workerUrl) {
-    $dropin = "[Service]`nEnvironment=GOOSE_WORKER_URL=$workerUrl`nEnvironment=GOOSE_WORKER_TIMEOUT=1620`nEnvironment=BUZZ_CONTROL_HOST=0.0.0.0`nEnvironment=BUZZ_CONTROL_PORT=8743`n"
+    $dropin = "[Service]`nEnvironment=GOOSE_WORKER_URL=$workerUrl`nEnvironment=GOOSE_WORKER_TIMEOUT=1620`nEnvironment=BUZZ_CONTROL_HOST=0.0.0.0`nEnvironment=BUZZ_CONTROL_PORT=8743`nEnvironment=GOOSE_WORKER_SA=$gooseSa`n"
+    if ($controlUrl) {
+        $dropin += "Environment=WORKER_APPLY_AUDIENCE=$controlUrl`nEnvironment=LISTENER_CONTROL_URL=$controlUrl`n"
+    }
     $dropinPath = Join-Path $env:TEMP "buzz-listener-worker.conf"
     [System.IO.File]::WriteAllText($dropinPath, ($dropin -replace "`r`n", "`n"))
     Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo mkdir -p /etc/systemd/system/buzz-listener.service.d"
     Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $dropinPath "${inst}:/tmp/buzz-listener-worker.conf"
     Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo mv /tmp/buzz-listener-worker.conf /etc/systemd/system/buzz-listener.service.d/worker.conf && sudo systemctl daemon-reload && sudo systemctl restart buzz-listener.service || true"
     Write-Host "listener GOOSE_WORKER_URL=$workerUrl"
+}
+if ($controlUrl) {
+    Write-Host "setting goose-worker LISTENER_CONTROL_URL=$controlUrl"
+    Invoke-Gcloud run services update $C.GOOSE_SERVICE --project $Project --region $Region `
+        --update-env-vars "LISTENER_CONTROL_URL=$controlUrl" --quiet
 }
 
 $ip = (& gcloud compute instances describe $inst --project $Project --zone $Zone --format="value(networkInterfaces[0].accessConfigs[0].natIP)").Trim()

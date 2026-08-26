@@ -14,7 +14,10 @@ messages  send, get, thread, search — multiline via `--content -`
 mem       ls / get / set / patch / rm. Never `buzz mem rm core`.
 canvas    get / set --channel <uuid>
 channels / dms / users / huddle / workflows / feed / social / repos / issues / pr / upload / projects
-agents    draft-create / draft-update — never claim the agent exists until the owner saves it in Desktop
+agents    buzz-cloud-agents propose / apply / cancel — two-turn chat confirm.
+          Propose the full instructions, ask the owner to reply confirm (or
+          cancel). Never call buzz agents draft-create or draft-update.
+          On confirm run apply; the agent is live (no Desktop Save).
 
 Core is already in Top of Mind when `[Agent Memory — core]` is present. Follow it unless the user overrides. Keep core ~10 KB; durable detail goes to `mem/<topic>`. Memory is `buzz mem` only — this image has no Goose memory extension. If that section is missing, do not create or overwrite core this turn. Paste `buzz://` link fields verbatim.
 
