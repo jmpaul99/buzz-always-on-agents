@@ -42,7 +42,7 @@ RUN mkdir -p /opt/goose /tmp/goose && cd /tmp/goose \
     && ln -sfn /opt/goose/goose /usr/local/bin/goose \
     && rm -rf /tmp/goose
 
-COPY goose-job/litellm_proxy.py goose-job/entrypoint.sh goose-job/worker.py goose-job/agenthome.py goose-job/nip44.py goose-job/observer.py goose-job/activity.py /app/
+COPY goose-job/litellm_proxy.py goose-job/entrypoint.sh goose-job/worker.py goose-job/agenthome.py goose-job/nip44.py goose-job/observer.py goose-job/activity.py goose-job/memory.py /app/
 COPY listener/nostrutil.py /app/nostrutil.py
 RUN mkdir -p /home/goose/.config/goose /home/goose/.config/gcloud /opt/buzz/local-mcp /home/goose/recipes
 COPY goose/config.yaml /home/goose/.config/goose/config.yaml

@@ -505,6 +505,9 @@ def put_agent(token: str, row: dict[str, Any], nsec: str) -> str:
         "relay_url": row.get("relay_url") or au.DEFAULT_RELAY,
         "updated_at": row.get("updated_at") or au.utc_now(),
         "channel_allowlist": row.get("channel_allowlist") or [],
+        "team_instructions": row.get("team_instructions") or au.load_team_instructions(
+            _agents_dir() / "teams.json", str(row.get("team_id") or "")
+        ),
     }
     got = api("PUT", f"/agents/{pk}", token, body)
     return str(got.get("agent_id") or slug)
@@ -543,8 +546,11 @@ def sanitize_backend(row: dict[str, Any]) -> bool:
 
 
 def mark_cloud_backend(row: dict[str, Any], slug: str) -> None:
-    row["backend"] = provider_backend(row.get("backend") if isinstance(row.get("backend"), dict) else None)
-    row["backend_agent_id"] = slug
+    au.apply_cloud_runtime(
+        row,
+        slug,
+        provider_backend(row.get("backend") if isinstance(row.get("backend"), dict) else None),
+    )
 
 
 def push(state: dict[str, Any], records: list, blob: dict[str, Any]) -> bool:
@@ -564,6 +570,9 @@ def push(state: dict[str, Any], records: list, blob: dict[str, Any]) -> bool:
                 "respond_to": row.get("respond_to"),
                 "respond_to_allowlist": row.get("respond_to_allowlist"),
                 "team_id": row.get("team_id"),
+                "team_instructions": au.load_team_instructions(
+                    _agents_dir() / "teams.json", str(row.get("team_id") or "")
+                ),
                 "relay_url": row.get("relay_url"),
                 "channel_allowlist": row.get("channel_allowlist"),
             }
@@ -581,6 +590,16 @@ def push(state: dict[str, Any], records: list, blob: dict[str, Any]) -> bool:
         api("DELETE", f"/agents/{pk}", token)
         tracked.pop(pk, None)
         log(f"undeployed {pk[:12]}")
+    for pk, row in live.items():
+        prev = tracked.get(pk) or {}
+        slug = str(prev.get("slug") or row.get("backend_agent_id") or au.slug_name(str(row.get("name") or "agent")))
+        if not prev:
+            continue
+        before = (row.get("model"), row.get("provider"), row.get("is_active"), row.get("agent_command"))
+        mark_cloud_backend(row, slug)
+        after = (row.get("model"), row.get("provider"), row.get("is_active"), row.get("agent_command"))
+        if before != after:
+            wrote_desktop = True
     state["agents"] = tracked
     return wrote_desktop
 
@@ -607,6 +626,10 @@ def pull(state: dict[str, Any], records: list) -> bool:
     for pk in removed:
         log(f"dropped local card {pk[:12]}")
     for pk in updated:
+        row = next((r for r in records if str(r.get("pubkey") or "").lower() == pk), None)
+        if isinstance(row, dict):
+            slug = str((tracked.get(pk) or {}).get("slug") or row.get("slug") or "")
+            mark_cloud_backend(row, slug)
         log(f"pulled settings for {pk[:12]}")
     live = live_rows(records)
     imported_pks = {str(item.get("pubkey") or "").lower() for item in imported}
@@ -636,7 +659,8 @@ def pull(state: dict[str, Any], records: list) -> bool:
             blob_changed = True
     if blob_changed:
         write_cred_blob(blob)
-    return bool(imported or removed or updated or blob_changed)
+    teams_changed = _merge_cloud_teams(cloud_agents)
+    return bool(imported or removed or updated or blob_changed or teams_changed)
 
 
 def persist_records(path: pathlib.Path, records: list) -> None:
@@ -648,6 +672,15 @@ def persist_records(path: pathlib.Path, records: list) -> None:
         save_json(path, records)
         return
     save_json(path, records)
+
+
+def _merge_cloud_teams(cloud_agents: list) -> bool:
+    path = _agents_dir() / "teams.json"
+    data = load_json(path, [])
+    if not au.apply_cloud_team_instructions(au.teams_records(data), cloud_agents):
+        return False
+    save_json(path, data)
+    return True
 
 
 def sync_once(state: dict[str, Any]) -> dict[str, Any]:

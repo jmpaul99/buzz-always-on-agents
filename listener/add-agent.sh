@@ -61,6 +61,16 @@ if [[ -n "${BUZZ_ACP_SYSTEM_PROMPT+x}" ]]; then
   chmod 600 "${INSTRUCTIONS_FILE}"
   chown root:root "${INSTRUCTIONS_FILE}"
 fi
+TEAM_FILE="/etc/buzz/${NAME}.team"
+if [[ -n "${BUZZ_ACP_TEAM_INSTRUCTIONS+x}" ]]; then
+  if [[ -z "${BUZZ_ACP_TEAM_INSTRUCTIONS}" ]]; then
+    rm -f "${TEAM_FILE}"
+  else
+    printf '%s\n' "${BUZZ_ACP_TEAM_INSTRUCTIONS}" >"${TEAM_FILE}"
+    chmod 600 "${TEAM_FILE}"
+    chown root:root "${TEAM_FILE}"
+  fi
+fi
 
 if systemctl is-active --quiet buzz-listener.service; then
   echo "listener will hot-reload ${NAME}"

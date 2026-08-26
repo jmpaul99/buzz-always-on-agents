@@ -124,8 +124,10 @@ class WorkerObserverTest(unittest.TestCase):
         self.assertLess(src.find("ObserverPublisher"), src.find("_agent_home"))
         self.assertLess(src.find("_agent_home"), src.find("wait_ready"))
         self.assertLess(src.find("wait_ready"), src.find("_spawn_goose"))
-        self.assertIn("REPLY_STOP_SECS", src)
-        self.assertIn("replied_at", src)
+        self.assertIn("GOOSE_IDLE_TIMEOUT", src)
+        self.assertNotIn("REPLY_IDLE_SECS", src)
+        self.assertNotIn("reply_stop_decision", src)
+        self.assertNotIn("second_send", src)
 
     def test_run_warms_observer_before_queue(self):
         src = inspect.getsource(Handler.do_POST)

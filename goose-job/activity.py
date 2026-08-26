@@ -37,7 +37,7 @@ RECIPE_DUMP_RE = re.compile(
 )
 SKIP_TOOLS: set[str] = set()
 SKIP_COMMAND_RE = re.compile(
-    r"\benv\b.*\bBUZZ\b|BUZZ_PRIVATE_KEY|printenv|--help\b|buzz help",
+    r"\benv\b.*\bBUZZ\b|BUZZ_PRIVATE_KEY|printenv",
     re.I,
 )
 ACCEPTED_RE = re.compile(r'"accepted"\s*:\s*true', re.I)
@@ -193,10 +193,12 @@ class GooseActivityParser:
         emit: EmitFn,
         on_activity: Callable[[], None] | None = None,
         on_reply: Callable[[], None] | None = None,
+        on_second_send: Callable[[], None] | None = None,
     ) -> None:
         self._emit = emit
         self._on_activity = on_activity
         self._on_reply = on_reply
+        self._on_second_send = on_second_send
         self._buf = ""
         self._json = ""
         self._tool_n = 0
@@ -204,12 +206,16 @@ class GooseActivityParser:
         self._tui_id = ""
         self._prose: list[str] = []
         self.replied = False
+        self.send_count = 0
         self._seen_tool = False
         self.last_tool = ""
         self.last_command = ""
         self.last_reply = ""
         self.json_events = 0
         self.stdout_bytes = 0
+
+    def tools_open(self) -> bool:
+        return bool(self._open)
 
     def feed(self, chunk: str) -> None:
         self.stdout_bytes += len(chunk)
@@ -500,11 +506,14 @@ class GooseActivityParser:
         return self._looks_like_send(command, output)
 
     def _mark_replied(self) -> None:
-        if self.replied:
+        self.send_count += 1
+        if self.send_count == 1:
+            self.replied = True
+            if self._on_reply:
+                self._on_reply()
             return
-        self.replied = True
-        if self._on_reply:
-            self._on_reply()
+        if self._on_second_send:
+            self._on_second_send()
 
     def _finish_tui(self, completed: bool) -> None:
         if self._tui_id:

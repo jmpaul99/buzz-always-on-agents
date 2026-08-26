@@ -45,11 +45,13 @@ Written by the control API, `add-agent.sh`, or Desktop sync. Mode `700` on `/etc
 | `BUZZ_PUBKEY` | Declared hex pubkey (mismatch → key-derived pubkey wins) |
 | `BUZZ_ACP_RESPOND_TO` | `owner-only` (default), `allowlist`, or anything else = everyone |
 | `BUZZ_ACP_RESPOND_TO_ALLOWLIST` | Comma-separated pubkeys |
-| `BUZZ_TEAM_ID` | Desktop team id (stored; not used for routing) |
+| `BUZZ_TEAM_ID` | Desktop team id |
 | `BUZZ_UPDATED_AT` | RFC3339; last-write-wins with Desktop |
 | `BUZZ_CHANNEL_ALLOWLIST` | Optional comma-separated channel ids |
 
 `/etc/buzz/<slug>.instructions` is the system prompt (max 8000 chars when loaded).
+
+`/etc/buzz/<slug>.team` is denormalized team instruction text (max 8000). Deleted when instructions are empty so a cleared team does not leave stale text.
 
 Slug: `[a-z0-9][a-z0-9-]{0,31}`. If the display-name slug is already another pubkey, the API suffixes `-{pubkey[:8]}`.
 
@@ -60,11 +62,11 @@ Firewall: IAP range `35.235.240.0/20` only (`allow-iap-8743`). Token: `/etc/buzz
 | Method | Path | Body / result |
 | --- | --- | --- |
 | `GET` | `/health`, `/healthz` | `{"ok":true}` (no auth) |
-| `GET` | `/agents` | Roster for Desktop sync: slug, pubkey, display, prompt, permissions, `owner`, `updated_at`, `nsec`, `auth_tag`. Auth required. Never log the body. Sidecars import only agents this Desktop user can access. |
+| `GET` | `/agents` | Roster for Desktop sync: slug, pubkey, display, prompt, permissions, `owner`, `updated_at`, `nsec`, `auth_tag`, `team_instructions`. Auth required. Never log the body. Sidecars import only agents this Desktop user can access. |
 | `PUT` | `/agents/{pubkey}` | Upsert. `nsec` required on create; omitted on update keeps the existing key. `nsec` must match `{pubkey}`. |
-| `DELETE` | `/agents/{pubkey}` | Removes `.env` and `.instructions`. Idempotent. |
+| `DELETE` | `/agents/{pubkey}` | Removes `.env`, `.instructions`, and `.team`. Idempotent. |
 
-PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_prompt`, `respond_to`, `respond_to_allowlist`, `team_id`, `auth_tag`, `relay_url` / `relay`, `updated_at`, `channel_allowlist`. Payload cap 512 KiB.
+PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_prompt`, `respond_to`, `respond_to_allowlist`, `team_id`, `team_instructions`, `auth_tag`, `relay_url` / `relay`, `updated_at`, `channel_allowlist`. Payload cap 512 KiB.
 
 Hot-reload watches the env files; PUT/DELETE do not restart systemd. Redeploy the listener for Desktop roster import (`nsec` on GET `/agents`).
 
@@ -74,7 +76,7 @@ Requires `GOOSE_WORKER_URL` (set by deploy as a systemd drop-in). Timeout defaul
 
 Recipe: `taskmcp.match_task_recipe` against `task-mcps.json`. A recipe is sent only when **exactly one** catalog slug’s keywords appear in the mention. Ambiguous or no hit → generic Goose prompt (Extension Manager can still enable MCPs).
 
-The prompt tells Goose to `buzz messages send --channel …` (and `--reply-to` when the mention has an `e` tag). Prompt cap 20 000 chars; message body 8 000.
+The prompt tells Goose to `buzz messages send --channel …` (and `--reply-to` when the mention has an `e` tag). Prompt cap 20 000 chars; message body 8 000. `BUZZ_TEAM_INSTRUCTIONS` is passed from `/etc/buzz/<slug>.team` when present.
 
 ## systemd
 

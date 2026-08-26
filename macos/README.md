@@ -65,12 +65,13 @@ Logs: `~/Library/Application Support/xyz.block.buzz.app/agents/cloud-sync.log`. 
 
 ### Sync vs not
 
-| Syncs | Does not sync |
+| Syncs | Relay-native / not synced |
 | --- | --- |
-| Create / delete (this Desktop and other sidecars) | Local harness / `agent_command` / ACP/MCP commands |
-| `system_prompt` | `is_active`, `runtime_pid`, start/stop timestamps |
-| `respond_to`, allowlist, `channel_allowlist` | Channel membership (Block relay) |
-| `team_id`, display name, relay URL | |
+| Create / delete (this Desktop and other sidecars) | Memories, canvas, huddle, thread (relay; worker fetches via `buzz`) |
+| `system_prompt`, team instruction text | Channel membership (Block relay) |
+| `respond_to`, allowlist, `channel_allowlist` | `is_active`, `runtime_pid`, start/stop timestamps |
+| `team_id`, display name, relay URL | Phone Buzz; GCS workspace (cloud agents only) |
+| Card overwritten to cloud Goose/LiteLLM (`model=goose`, `provider=litellm`) | Switching Run on → this computer is reverted next sidecar cycle |
 
 Deleting a Desktop card undeploys the GCP agent **and** removes the card on other Desktops. Stopping the card does **not**. Imported cards arrive as **Run on → cloud** and stopped.
 

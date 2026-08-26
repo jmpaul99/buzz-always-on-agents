@@ -45,6 +45,9 @@ POST JSON:
     "BUZZ_OWNER_PUBKEY": "…",
     "BUZZ_AUTHOR_PUBKEY": "…",
     "BUZZ_MESSAGE": "…",
+    "BUZZ_IDENTITY": "…",
+    "BUZZ_SEND_CMD": "…",
+    "BUZZ_TEAM_INSTRUCTIONS": "…",
     "GOOSE_RECIPE": "playwright"
   }
 }
@@ -58,15 +61,14 @@ Only the `PASS_ENV` keys are copied. Prompt cap 20 000. Payload cap 512 KiB. R
 - **One turn at a time per agent.** Extra mentions for the same agent queue FIFO. Other agents can run in parallel.
 - Relay URLs are rewritten `wss://` → `https://` for `buzz` HTTP.
 
-Isolation: each agent gets `/tmp/goose-<slug>` with its own `HOME`, `XDG_CONFIG_HOME`, and npm cache. `agenthome.sync_agent_home` copies config, `.goosehints`, `guardrails.md`, and gcloud ADC into that HOME.
+Isolation: each agent gets `/tmp/goose-<slug>` with its own `HOME`, `XDG_CONFIG_HOME`, and npm cache. `agenthome.sync_agent_home` copies config, `.goosehints`, `guardrails.md`, and gcloud ADC into that HOME. The worker then writes `tom.md` (guardrails plus standing sections from `buzz mem` / canvas / huddle / thread / team / workspace) and points `GOOSE_MOIM_MESSAGE_FILE` at it. cwd is `/mnt/buzz/agents/<slug>` when the GCS volume is mounted; HOME stays under `/tmp`. Channel work goes in `/mnt/buzz/channels/<id>/` (created on the first turn in that huddle). `shared/` is for files every agent in every channel should see.
 
 ## Timeouts
 
 | Knob | Default | Behavior |
 | --- | --- | --- |
 | `GOOSE_TIMEOUT_SECS` | 1500 | Hard kill of the Goose process |
-| `GOOSE_IDLE_TIMEOUT_SECS` | 180 | Kill if no parser activity before a channel reply |
-| Reply grace | 20s | After `buzz messages send` is seen, idle this long then stop (success) |
+| `GOOSE_IDLE_TIMEOUT_SECS` | 180 | Kill if no parser/LLM/tool activity (hang). Success if a channel send already happened. |
 | Fallback send | after Goose exits | If no channel send was seen, worker posts Goose's last text (or a short notice) |
 | Cloud Run request timeout | 3600s | Service deploy |
 
@@ -79,7 +81,7 @@ Activity is Goose stdout **or** LiteLLM sidecar `/activity` (`in_flight > 0`). L
 - If `GOOSE_RECIPE` matches `/home/goose/recipes/<slug>/recipe.yaml`, run `goose run --recipe … --params message=…` (task MCP already enabled in that recipe).
 - Else the generated `reply` recipe (always-on extensions + send-required instructions). `-t` is only a last resort if that file is missing.
 
-Always `--no-session --quiet --output-format stream-json`. Quiet drops recipe-load TUI; stream-json still carries thoughts/tools. Goose is attached to a PTY so JSON is not block-buffered (a pipe left `json=0 bytes=0` until exit, which is why activity arrived after the channel reply and Goose sent twice). After the first `buzz messages send`, the worker kills Goose in 0.5s so it cannot start another LiteLLM call. `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low`.
+Always `--no-session --quiet --output-format stream-json`. Quiet drops recipe-load TUI; stream-json still carries thoughts/tools. Goose is attached to a PTY so JSON is not block-buffered (a pipe left `json=0 bytes=0` until exit, which is why activity arrived after the channel reply and Goose sent twice). The worker does **not** stop on the first or second channel send. It waits until Goose exits, idle-timeouts (no LLM/tools/parser activity), or `GOOSE_TIMEOUT_SECS`. `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low`.
 
 ## Observer (kind 24200)
 
@@ -105,7 +107,8 @@ Goose’s LiteLLM client is non-streaming: it POSTs and waits for one JSON body.
 | `entrypoint.sh` | Sidecar + worker. Never echoes nsecs. |
 | `worker.py` | HTTP server, per-agent queues, Goose spawn |
 | `agenthome.py` | Copy config into isolated HOME |
-| `activity.py` | Stdout → observer events + redact |
+| `activity.py` | Stdout → observer events + redact (`--help` is shown; env dumps are not) |
+| `memory.py` | `buzz mem get core` plus canvas/huddle/thread/team/workspace → `tom.md` |
 | `observer.py` | Kind 24200 WSS publisher |
 | `nip44.py` | NIP-44 v2 encrypt for observer payloads |
 | `litellm_proxy.py` | Localhost → Cloud Run LiteLLM |
@@ -114,7 +117,7 @@ Goose’s LiteLLM client is non-streaming: it POSTs and waits for one JSON body.
 
 ## Deploy knobs
 
-Set in [`infra/deploy-goose-job.ps1`](../infra/deploy-goose-job.ps1): 2 vCPU / 4 Gi, min 0, max 1, concurrency 2, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`. Secrets: LiteLLM master, Gemini/Groq/NIM, optional GitHub/Tavily/Stripe, optional ADC JSON at `/secrets/adc.json`.
+Set in [`infra/deploy-goose-job.ps1`](../infra/deploy-goose-job.ps1): 2 vCPU / 4 Gi, min 0, max 1, concurrency 2, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`. GCS workspace bucket mounted at `/mnt/buzz`. Secrets: LiteLLM master, Gemini/Groq/NIM, optional GitHub/Tavily/Stripe, optional ADC JSON at `/secrets/adc.json`.
 
 ## Tests
 

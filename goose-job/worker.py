@@ -22,6 +22,7 @@ from typing import Any
 
 from activity import GooseActivityParser, redact
 from agenthome import sync_agent_home
+from memory import collect_sections, ensure_workspace, write_tom_md
 from observer import ObserverPublisher, WAIT_READY_SECS, warm_observer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -30,7 +31,6 @@ log = logging.getLogger("goose-worker")
 PORT = int(os.environ.get("PORT", "8080"))
 GOOSE_TIMEOUT = int(os.environ.get("GOOSE_TIMEOUT_SECS", "1500"))
 GOOSE_IDLE_TIMEOUT = int(os.environ.get("GOOSE_IDLE_TIMEOUT_SECS", "180"))
-REPLY_STOP_SECS = 0.5  # after the first channel send is parsed, kill before the next LLM call
 LIVENESS_SECS = 10
 SEND_TIMEOUT_SECS = 45
 FALLBACK_REPLY = (
@@ -56,6 +56,8 @@ PASS_ENV = (
     "BUZZ_MESSAGE",
     "BUZZ_IDENTITY",
     "BUZZ_SEND_CMD",
+    "BUZZ_TEAM_INSTRUCTIONS",
+    "BUZZ_WORKSPACE",
     "GOOSE_RECIPE",
 )
 
@@ -93,6 +95,7 @@ _pool: ThreadPoolExecutor | None = None
 
 def _safe_agent(name: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in (name or "agent").lower())
+    cleaned = "-".join(p for p in cleaned.split("-") if p)
     return (cleaned[:32] or "agent")
 
 
@@ -188,9 +191,17 @@ def _fallback_send(env: dict[str, str], parser: GooseActivityParser) -> bool:
     return False
 
 
+def _strip_controls(text: str) -> str:
+    """YAML forbids C0/C1/DEL in every scalar, including `|` blocks after Jinja render."""
+    return "".join(
+        " " if (ord(ch) < 32 or ord(ch) == 127 or 0x80 <= ord(ch) <= 0x9F) else ch
+        for ch in text
+    )
+
+
 def one_line(text: str, limit: int = 8000) -> str:
-    """Goose parses --params as YAML. Newlines in a value break the recipe file."""
-    return " ".join((text or "").split()).replace('"', "'")[:limit]
+    """Goose Jinja-renders --params into the recipe YAML, then parses it again."""
+    return " ".join(_strip_controls(text or "").split()).replace('"', "'")[:limit]
 
 
 def recipe_params(env: dict[str, str], prompt: str = "") -> dict[str, str]:
@@ -244,7 +255,30 @@ def build_goose_cmd(
     return cmd
 
 
-def _spawn_goose(env: dict[str, str], home: pathlib.Path) -> tuple[subprocess.Popen[bytes], Any]:
+def prepare_turn(env: dict[str, str], agent: str, home: pathlib.Path) -> pathlib.Path:
+    """Write tom.md, point Top of Mind at it, mkdir the GCS workspace, return cwd."""
+    env["HOME"] = str(home)
+    env["XDG_CONFIG_HOME"] = str(home / ".config")
+    env["npm_config_cache"] = str(home / ".npm")
+    guardrails_path = home / ".config" / "goose" / "guardrails.md"
+    guardrails = ""
+    if guardrails_path.is_file():
+        try:
+            guardrails = guardrails_path.read_text(encoding="utf-8")
+        except OSError:
+            guardrails = ""
+    sections = collect_sections(env, agent)
+    tom = write_tom_md(home, guardrails, sections)
+    env["GOOSE_MOIM_MESSAGE_FILE"] = str(tom)
+    cwd = ensure_workspace(agent, env)
+    return cwd or home
+
+
+def _spawn_goose(
+    env: dict[str, str],
+    home: pathlib.Path,
+    cwd: pathlib.Path | None = None,
+) -> tuple[subprocess.Popen[bytes], Any]:
     cmd = build_goose_cmd(
         env.get("PROMPT") or env.get("BUZZ_MESSAGE") or "",
         env.get("GOOSE_RECIPE", ""),
@@ -259,7 +293,7 @@ def _spawn_goose(env: dict[str, str], home: pathlib.Path) -> tuple[subprocess.Po
     env.setdefault("LINES", "24")
     kw: dict[str, Any] = {
         "env": env,
-        "cwd": str(home),
+        "cwd": str(cwd or home),
         "stdin": subprocess.DEVNULL,
         "start_new_session": True,
     }
@@ -319,15 +353,10 @@ def _run_goose(turn: Turn) -> None:
     env.setdefault("GOOSE_CLI_SHOW_THINKING", "1")
     env.setdefault("GOOSE_THINKING_EFFORT", "low")
     home = _agent_home(turn.agent)
-    env["HOME"] = str(home)
-    env["XDG_CONFIG_HOME"] = str(home / ".config")
-    env["npm_config_cache"] = str(home / ".npm")
     env.setdefault("GOOSE_RECIPE_PATH", "/home/goose/recipes")
     if not (env.get("GOOSE_RECIPE") or "").strip():
         env["GOOSE_RECIPE"] = DEFAULT_RECIPE
-    guardrails = home / ".config" / "goose" / "guardrails.md"
-    if guardrails.is_file():
-        env["GOOSE_MOIM_MESSAGE_FILE"] = str(guardrails)
+    cwd = prepare_turn(env, turn.agent, home)
     wait_t = time.monotonic()
     ready = observer.wait_ready(WAIT_READY_SECS)
     log.info(
@@ -338,22 +367,14 @@ def _run_goose(turn: Turn) -> None:
     )
     log.info("goose start agent=%s recipe=%s", turn.agent, env.get("GOOSE_RECIPE") or "-")
     replied = threading.Event()
-    replied_at = 0.0
-
-    def _on_reply() -> None:
-        nonlocal replied_at
-        if not replied.is_set():
-            replied_at = time.monotonic()
-        replied.set()
-
     parser = GooseActivityParser(
         observer.emit,
         on_activity=activity.bump,
-        on_reply=_on_reply,
+        on_reply=replied.set,
     )
     out: Any = None
     try:
-        proc, out = _spawn_goose(env, home)
+        proc, out = _spawn_goose(env, home, cwd)
     except OSError as exc:
         turn.returncode = 1
         turn.error = type(exc).__name__
@@ -376,6 +397,10 @@ def _run_goose(turn: Turn) -> None:
                 turn.returncode = int(code)
                 break
             now = time.monotonic()
+            llm = _llm_in_flight()
+            busy = llm or parser.tools_open()
+            if busy:
+                activity.bump()
             if now - last_status >= 30:
                 last_status = now
                 log.info(
@@ -383,7 +408,7 @@ def _run_goose(turn: Turn) -> None:
                     turn.agent,
                     now - started,
                     replied.is_set(),
-                    _llm_in_flight(),
+                    llm,
                     now - activity.last(),
                     parser.last_tool or "-",
                     redact(parser.last_command)[:80] or "-",
@@ -399,21 +424,17 @@ def _run_goose(turn: Turn) -> None:
                 turn.error = "goose timed out"
                 log.error("goose timeout agent=%s", turn.agent)
                 break
-            if replied.is_set() and now - replied_at >= REPLY_STOP_SECS:
+            if not busy and now - activity.last() > GOOSE_IDLE_TIMEOUT:
                 _kill_proc(proc)
-                turn.returncode = 0
-                log.info("goose stop after reply agent=%s", turn.agent)
+                if replied.is_set() or parser.replied:
+                    turn.returncode = 0
+                    log.info("goose stop idle agent=%s", turn.agent)
+                else:
+                    turn.returncode = 124
+                    turn.error = "idle timeout"
+                    log.error("goose idle timeout agent=%s", turn.agent)
                 break
-            if not replied.is_set() and now - activity.last() > GOOSE_IDLE_TIMEOUT:
-                _kill_proc(proc)
-                turn.returncode = 124
-                turn.error = "idle timeout"
-                log.error("goose idle timeout agent=%s", turn.agent)
-                break
-            if replied.is_set():
-                time.sleep(min(0.2, max(0.05, REPLY_STOP_SECS - (time.monotonic() - replied_at))))
-            else:
-                time.sleep(0.2)
+            time.sleep(0.2)
     finally:
         if proc.poll() is None:
             _kill_proc(proc)

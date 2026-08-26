@@ -79,9 +79,11 @@ def allocate_slug(agents_dir: pathlib.Path, slug: str, pubkey: str) -> str:
 def compact_desktop_records(records: list) -> tuple[list, list[dict[str, Any]]]:
     """One keyed agent per display name. Drop empty-pubkey drafts that duplicate a real card.
 
-    Builtin persona stubs (empty pubkey + is_builtin) are kept. Duplicate identities
-    that share a name keep the oldest created_at row; team_id/persona/avatar copy over
-    if the keeper is missing them.
+    Builtin persona stubs (empty pubkey + is_builtin) are kept. Custom empty-pubkey
+    stubs that duplicate a keyed card are dropped, and that card is detached from
+    the missing persona so Desktop lists it under Custom agents instead of Unknown.
+    Duplicate identities that share a name keep the oldest created_at row;
+    team_id/persona/avatar copy over if the keeper is missing them.
     """
     if not isinstance(records, list):
         return [], []
@@ -135,6 +137,19 @@ def compact_desktop_records(records: list) -> tuple[list, list[dict[str, Any]]]:
             dropped.append(row)
             continue
         keep_empty.append(row)
+
+    catalog: set[str] = set()
+    for row in keep_empty:
+        for key in ("slug", "persona_id"):
+            val = str(row.get(key) or "")
+            if val:
+                catalog.add(val)
+    for row in keyed.values():
+        pid = str(row.get("persona_id") or "")
+        if pid and pid not in catalog:
+            row["persona_id"] = None
+            if "persona_source_version" in row:
+                row["persona_source_version"] = None
 
     seen: set[str] = set()
     keep_empty_ids = {id(row) for row in keep_empty}
@@ -395,6 +410,7 @@ def public_record(
         "respond_to": agent.get("respond_to") or "owner-only",
         "respond_to_allowlist": list(agent.get("respond_to_allowlist") or []),
         "team_id": agent.get("team_id") or "",
+        "team_instructions": str(agent.get("team_instructions") or ""),
         "updated_at": updated_at or agent.get("updated_at") or "",
         "relay_url": agent.get("relay") or "",
         "channel_allowlist": list(agent.get("channel_allowlist") or []),
@@ -431,6 +447,7 @@ def upsert_agent_files(
     system_prompt: str | None,
     channel_allowlist: list[str] | None = None,
     previous_slug: str | None = None,
+    team_instructions: str | None = None,
 ) -> pathlib.Path:
     if not SLUG_RE.match(slug):
         raise ValueError("invalid agent slug")
@@ -460,6 +477,8 @@ def upsert_agent_files(
             os.chmod(inst, 0o600)
         except OSError:
             pass
+    if team_instructions is not None:
+        write_team_file(agents_dir, slug, team_instructions)
     if previous_slug and previous_slug != slug and SLUG_RE.match(previous_slug):
         delete_agent_files(agents_dir, previous_slug)
     return env_path
@@ -468,7 +487,7 @@ def upsert_agent_files(
 def delete_agent_files(agents_dir: pathlib.Path, slug: str) -> None:
     if not SLUG_RE.match(slug):
         raise ValueError("invalid agent slug")
-    for suffix in (".env", ".instructions"):
+    for suffix in (".env", ".instructions", ".team"):
         path = agents_dir / f"{slug}{suffix}"
         try:
             path.unlink()
@@ -503,7 +522,7 @@ def build_goose_prompt(
         "If the user asked to react, run buzz reactions on this mention's Event id "
         "in the same turn as the send, then stop. "
         "Shell tools require a non-empty command argument. "
-        "Do not dump --help, print env, or echo secrets. "
+        "Do not print env or echo secrets. "
         "Summarize browsing; do not attach large screenshots."
     )
 
@@ -516,6 +535,107 @@ def load_instructions(agents_dir: pathlib.Path, slug: str) -> str:
         return path.read_text(encoding="utf-8").strip()[:8000]
     except OSError:
         return ""
+
+
+def write_team_file(agents_dir: pathlib.Path, slug: str, text: str) -> None:
+    path = agents_dir / f"{slug}.team"
+    cleaned = (text or "").strip()
+    if not cleaned:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    path.write_text(cleaned[:8000] + "\n", encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def load_team_file(agents_dir: pathlib.Path, slug: str) -> str:
+    path = agents_dir / f"{slug}.team"
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8").strip()[:8000]
+    except OSError:
+        return ""
+
+
+def teams_records(data: Any) -> list[dict[str, Any]]:
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        for key in ("teams", "items", "records"):
+            raw = data.get(key)
+            if isinstance(raw, list):
+                return [item for item in raw if isinstance(item, dict)]
+    return []
+
+
+def team_instructions_from_records(data: Any, team_id: str, cap: int = 8000) -> str:
+    tid = (team_id or "").strip()
+    if not tid:
+        return ""
+    for item in teams_records(data):
+        if str(item.get("id") or "") != tid:
+            continue
+        return str(item.get("instructions") or "").strip()[:cap]
+    return ""
+
+
+def load_team_instructions(teams_path: pathlib.Path | str, team_id: str, cap: int = 8000) -> str:
+    path = pathlib.Path(teams_path)
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return team_instructions_from_records(data, team_id, cap)
+
+
+def apply_cloud_team_instructions(teams: list[dict[str, Any]], cloud_agents: list[Any]) -> bool:
+    """Write cloud team instruction text onto local teams that already exist.
+
+    Does not create teams. Fills empty local instructions, or overwrites when
+    the cloud agent updated_at is newer than the team's updated_at.
+    """
+    by_id = {str(item.get("id") or ""): item for item in teams if item.get("id")}
+    changed = False
+    for cloud in cloud_agents:
+        if not isinstance(cloud, dict):
+            continue
+        tid = str(cloud.get("team_id") or "").strip()
+        text = str(cloud.get("team_instructions") or "").strip()[:8000]
+        if not tid or not text or tid not in by_id:
+            continue
+        team = by_id[tid]
+        local = str(team.get("instructions") or "").strip()
+        if local == text:
+            continue
+        if not local or cloud_wins(str(cloud.get("updated_at") or ""), str(team.get("updated_at") or "")):
+            team["instructions"] = text
+            changed = True
+    return changed
+
+
+CLOUD_MODEL = "goose"
+CLOUD_PROVIDER = "litellm"
+HARNESS_CLEAR = ("agent_command", "agent_command_override", "acp_command", "mcp_command")
+
+
+def apply_cloud_runtime(row: dict[str, Any], slug: str, backend: dict[str, Any]) -> None:
+    """Cloud Goose + LiteLLM are source of truth for model and harness."""
+    row["backend"] = backend
+    row["backend_agent_id"] = slug
+    for key in HARNESS_CLEAR:
+        row[key] = ""
+    row["agent_args"] = []
+    row["model"] = CLOUD_MODEL
+    row["provider"] = CLOUD_PROVIDER
+    row["is_active"] = False
 
 
 def parse_loaded_agent(path: pathlib.Path, env: dict[str, str], pubkey: str) -> dict[str, Any]:
@@ -565,6 +685,7 @@ def settings_fingerprint(row: dict[str, Any]) -> str:
         "respond_to": row.get("respond_to") or "",
         "respond_to_allowlist": parse_allowlist(row.get("respond_to_allowlist")),
         "team_id": row.get("team_id") or "",
+        "team_instructions": row.get("team_instructions") or "",
         "relay_url": row.get("relay_url") or row.get("relay") or "",
         "channel_allowlist": row.get("channel_allowlist") or [],
     }

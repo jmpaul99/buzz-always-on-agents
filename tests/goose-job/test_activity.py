@@ -402,12 +402,38 @@ class GooseActivityParserTest(unittest.TestCase):
         ]
         self.assertEqual(thoughts, ["I'll send a short reply."])
 
-    def test_help_command_is_hidden(self):
+    def test_help_command_is_visible(self):
         events, _ = collect(
             "▸ shell\ncommand: buzz reactions --help\n"
             '{"accepted":true}\n'
         )
+        self.assertTrue(tools(events))
+
+    def test_printenv_is_still_hidden(self):
+        events, _ = collect(
+            "▸ shell\ncommand: printenv\n"
+            "BUZZ_PRIVATE_KEY=nsec1hidden\n"
+        )
         self.assertEqual(tools(events), [])
+
+    def test_second_send_increments_count(self):
+        events = []
+        seconds = []
+        parser = GooseActivityParser(
+            lambda kind, payload: events.append((kind, payload)),
+            on_second_send=lambda: seconds.append(True),
+        )
+        parser.feed(
+            "▸ shell\ncommand: buzz messages send --channel x hello\n"
+            '{"accepted":true,"id":"e1"}\n'
+        )
+        parser.feed(
+            "▸ shell\ncommand: buzz messages send --channel x again\n"
+            '{"accepted":true,"id":"e2"}\n'
+        )
+        parser.close()
+        self.assertEqual(parser.send_count, 2)
+        self.assertTrue(seconds)
 
     def test_messages_send_still_marks_replied(self):
         _events, replied = collect(

@@ -23,20 +23,42 @@ SEND_INSTRUCTIONS = """{{ identity }}
 You are a Buzz cloud agent. The user only sees the Buzz channel.
 
 Always:
-1. Do all requested work first (tools, lookups, edits).
-2. Send exactly one channel reply with: {{ send_cmd }}
-3. Stop immediately after that send. A later user message is a new turn.
+1. Do the requested work (tools, lookups, mem/canvas/file writes).
+2. Post anything the user should see with: {{ send_cmd }}
+   A text-only assistant answer is not delivered.
+3. Stop when the work is finished. A later user message is a new turn.
+
+You are a Buzz CLI power user. `buzz --help` and `buzz <group> --help` are allowed.
+
+messages  send, get, thread, search
+          multiline: buzz messages send --channel <uuid> --content -
+mem       ls / get / set / patch / rm. Never `buzz mem rm core`.
+          multiline: printf '...' | buzz mem set mem/<topic> -
+canvas    get / set --channel <uuid>
+channels  list / join / leave / get
+dms       list / get
+users     get / search
+huddle    get (owner-signed guidelines for this channel)
+workflows / feed / social / repos / issues / pr / upload / projects
+agents    draft-create / draft-update - never claim the agent exists until
+          the owner saves it in Desktop
+
+Core memory is already in Top of Mind when the [Agent Memory - core] section
+is present. Follow it unless the user overrides. Keep core small (~10 KB);
+durable detail goes to mem/<topic>. Memory is `buzz mem` only - this image
+has no Goose memory extension. If that section is missing, do not create or
+overwrite core this turn.
+
+Paste buzz:// `link` fields verbatim in channel replies.
 
 Never:
 - A status ping or "working on it" send (typing and Agent Activity cover that)
-- A second buzz messages send, confirmation, or repeat of the previous message
 - The todo extension
-- buzz --help or buzz reactions --help
 - buzz reactions unless the user asked to react
 - Narrate channel ids, event ids, or recipe parameters
-- End the turn with assistant text instead of send
-- Dump env, secrets, or --help
-- Enable Code Mode"""
+- Dump env or secrets
+- Enable Code Mode
+- Quoted newline escapes in send content (use --content -)"""
 
 
 def yaml_scalar(value: Any) -> str:
@@ -157,11 +179,15 @@ def write_recipes(config_text: str, recipes_dir: Path, catalog_path: Path | None
     slugs: list[str] = []
     reply_dir = recipes_dir / REPLY_SLUG
     reply_dir.mkdir(parents=True, exist_ok=True)
-    (reply_dir / "recipe.yaml").write_text(render_recipe(REPLY_SLUG), encoding="utf-8")
+    (reply_dir / "recipe.yaml").write_text(
+        render_recipe(REPLY_SLUG), encoding="utf-8", newline="\n"
+    )
     for slug, spec in mcps.items():
         dest = recipes_dir / slug
         dest.mkdir(parents=True, exist_ok=True)
-        (dest / "recipe.yaml").write_text(render_recipe(slug, spec), encoding="utf-8")
+        (dest / "recipe.yaml").write_text(
+            render_recipe(slug, spec), encoding="utf-8", newline="\n"
+        )
         slugs.append(slug)
     if catalog_path is not None:
         catalog_path.parent.mkdir(parents=True, exist_ok=True)

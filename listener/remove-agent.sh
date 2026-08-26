@@ -14,5 +14,5 @@ if [[ ! "${NAME}" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; then
   exit 2
 fi
 
-rm -f "/etc/buzz/${NAME}.env" "/etc/buzz/${NAME}.instructions"
+rm -f "/etc/buzz/${NAME}.env" "/etc/buzz/${NAME}.instructions" "/etc/buzz/${NAME}.team"
 echo "removed ${NAME}"

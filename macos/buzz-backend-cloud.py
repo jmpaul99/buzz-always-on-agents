@@ -103,6 +103,26 @@ def _slug(name: str) -> str:
     return s[:32] or "agent"
 
 
+def _team_instructions(agent: dict) -> str:
+    tid = str(agent.get("team_id") or "").strip()
+    if not tid:
+        return ""
+    path = _agents_dir() / "teams.json"
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    records = data if isinstance(data, list) else (data.get("teams") if isinstance(data, dict) else [])
+    if not isinstance(records, list):
+        return ""
+    for item in records:
+        if isinstance(item, dict) and str(item.get("id") or "") == tid:
+            return str(item.get("instructions") or "").strip()[:8000]
+    return ""
+
+
 def _allowlist(raw) -> str:
     if isinstance(raw, list):
         items = [str(x).strip().lower() for x in raw]
@@ -233,6 +253,7 @@ def _agent_fields(agent: dict) -> dict:
         "respond_to": str(agent.get("respond_to") or "owner-only").lower(),
         "allowlist": allow,
         "team_id": str(agent.get("team_id") or ""),
+        "team_instructions": _team_instructions(agent),
         "updated_at": str(agent.get("updated_at") or ""),
         "pubkey": str(agent.get("pubkey") or "").lower(),
     }
@@ -253,6 +274,7 @@ def _deploy(req: dict) -> dict:
         "respond_to": fields["respond_to"],
         "respond_to_allowlist": [p for p in fields["allowlist"].split(",") if p],
         "team_id": fields["team_id"],
+        "team_instructions": fields["team_instructions"],
         "auth_tag": fields["auth_tag"],
         "relay_url": fields["relay"],
         "updated_at": fields["updated_at"],
@@ -274,6 +296,7 @@ def _deploy(req: dict) -> dict:
             f"export BUZZ_ACP_RESPOND_TO={json.dumps(fields['respond_to'])}",
             f"export BUZZ_ACP_RESPOND_TO_ALLOWLIST={json.dumps(fields['allowlist'])}",
             f"export BUZZ_TEAM_ID={json.dumps(fields['team_id'])}",
+            f"export BUZZ_ACP_TEAM_INSTRUCTIONS={json.dumps(fields['team_instructions'])}",
             f"export BUZZ_UPDATED_AT={json.dumps(fields['updated_at'])}",
             f"sudo -E {remote} {fields['name']}",
             "",

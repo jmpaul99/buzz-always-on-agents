@@ -168,6 +168,7 @@ def execute_job(agent: dict[str, Any], evt: dict[str, Any]) -> None:
                 "BUZZ_MESSAGE": content[:8000],
                 "BUZZ_IDENTITY": identity[:8000],
                 "BUZZ_SEND_CMD": send_cmd,
+                "BUZZ_TEAM_INSTRUCTIONS": au.load_team_file(AGENTS_DIR, agent["name"]),
                 "GOOSE_RECIPE": recipe,
             },
         },
@@ -709,6 +710,7 @@ def upsert_from_api(pubkey: str, body: dict[str, Any]) -> dict[str, Any]:
         system_prompt=body.get("system_prompt") if "system_prompt" in body else None,
         channel_allowlist=list(body.get("channel_allowlist") or []),
         previous_slug=previous_slug,
+        team_instructions=body.get("team_instructions") if "team_instructions" in body else None,
     )
     return {"ok": True, "agent_id": slug, "pubkey": pubkey}
 
@@ -726,11 +728,14 @@ def list_public_agents() -> list[dict[str, Any]]:
     out = []
     for agent in load_agents():
         inst = au.load_instructions(AGENTS_DIR, agent["name"])
+        team = au.load_team_file(AGENTS_DIR, agent["name"])
         inst_ts = au.file_mtime_iso(AGENTS_DIR / f"{agent['name']}.instructions")
         updated = agent.get("updated_at") or ""
         if inst_ts > updated:
             updated = inst_ts
-        out.append(au.public_record(agent, inst, updated, include_secrets=True))
+        rec_agent = dict(agent)
+        rec_agent["team_instructions"] = team
+        out.append(au.public_record(rec_agent, inst, updated, include_secrets=True))
     return out
 
 

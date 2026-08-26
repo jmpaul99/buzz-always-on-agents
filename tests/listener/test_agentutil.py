@@ -144,6 +144,61 @@ class RecordTests(unittest.TestCase):
             au.delete_agent_files(root, "fizz")
             self.assertIsNone(au.find_env_by_pubkey(root, AGENT_PK))
 
+    def test_team_file_write_clear_delete(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            au.upsert_agent_files(
+                root,
+                slug="fizz",
+                nsec="nsec1notarealkeybutlongenough",
+                display="Fizz",
+                relay=au.DEFAULT_RELAY,
+                auth_tag="",
+                pubkey=AGENT_PK,
+                respond_to="owner-only",
+                respond_to_allowlist=[],
+                team_id="team-1",
+                updated_at="2026-08-25T00:00:00.000Z",
+                system_prompt="You are Fizz.",
+                team_instructions="Be kind.",
+            )
+            self.assertEqual(au.load_team_file(root, "fizz"), "Be kind.")
+            au.upsert_agent_files(
+                root,
+                slug="fizz",
+                nsec="nsec1notarealkeybutlongenough",
+                display="Fizz",
+                relay=au.DEFAULT_RELAY,
+                auth_tag="",
+                pubkey=AGENT_PK,
+                respond_to="owner-only",
+                respond_to_allowlist=[],
+                team_id="team-1",
+                updated_at="2026-08-25T00:00:00.000Z",
+                system_prompt="You are Fizz.",
+                team_instructions="",
+            )
+            self.assertEqual(au.load_team_file(root, "fizz"), "")
+            self.assertFalse((root / "fizz.team").exists())
+            au.upsert_agent_files(
+                root,
+                slug="fizz",
+                nsec="nsec1notarealkeybutlongenough",
+                display="Fizz",
+                relay=au.DEFAULT_RELAY,
+                auth_tag="",
+                pubkey=AGENT_PK,
+                respond_to="owner-only",
+                respond_to_allowlist=[],
+                team_id="team-1",
+                updated_at="2026-08-25T00:00:00.000Z",
+                system_prompt="You are Fizz.",
+                team_instructions="Be kind.",
+            )
+            au.delete_agent_files(root, "fizz")
+            self.assertFalse((root / "fizz.team").exists())
+            self.assertFalse((root / "fizz.env").exists())
+
     def test_merge_lww(self):
         row = {
             "system_prompt": "old",
@@ -224,6 +279,28 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(keyed.get("persona_id"), "builtin:fizz")
         self.assertEqual(len(dropped), 2)
 
+    def test_compact_detaches_orphaned_custom_persona(self):
+        pid = "95d7487b-3446-4921-a461-c73e5315fd62"
+        stub = {
+            "name": "Cloud Agent Health",
+            "pubkey": "",
+            "is_builtin": False,
+            "slug": pid,
+        }
+        instance = {
+            "name": "Cloud Agent Health",
+            "pubkey": AGENT_PK,
+            "persona_id": pid,
+            "persona_source_version": "abc",
+            "created_at": "2026-08-25T18:40:48Z",
+        }
+        kept, dropped = au.compact_desktop_records([stub, instance])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].get("pubkey"), AGENT_PK)
+        self.assertIsNone(kept[0].get("persona_id"))
+        self.assertIsNone(kept[0].get("persona_source_version"))
+        self.assertEqual(dropped, [stub])
+
     def test_public_record_secrets(self):
         agent = {
             "pubkey": AGENT_PK,
@@ -240,6 +317,9 @@ class RecordTests(unittest.TestCase):
         public = au.public_record(agent, "You are Fizz.")
         self.assertNotIn("nsec", public)
         self.assertNotIn("auth_tag", public)
+        self.assertEqual(public.get("team_instructions"), "")
+        agent["team_instructions"] = "Be kind."
+        self.assertEqual(au.public_record(agent, "You are Fizz.")["team_instructions"], "Be kind.")
         secret = au.public_record(agent, "You are Fizz.", include_secrets=True)
         self.assertEqual(secret["nsec"], "nsec1notarealkeybutlongenough")
         self.assertEqual(secret["auth_tag"], "[]")
@@ -442,6 +522,68 @@ class GoosePromptTests(unittest.TestCase):
         self.assertIn("every part of a multi-ask", low)
         self.assertIn("text-only answer is not delivered", low)
         self.assertNotIn("after a successful send, stop", low)
+
+
+class TeamInstructionsTest(unittest.TestCase):
+    def test_lookup_and_fingerprint(self):
+        teams = [{"id": "team-1", "instructions": "Be kind.", "updated_at": "2026-08-25T10:00:00.000Z"}]
+        self.assertEqual(au.team_instructions_from_records(teams, "team-1"), "Be kind.")
+        self.assertEqual(au.team_instructions_from_records(teams, "missing"), "")
+        row = {"name": "Fizz", "system_prompt": "hi", "team_id": "team-1", "team_instructions": "Be kind."}
+        other = dict(row)
+        other["team_instructions"] = "Be nicer."
+        self.assertNotEqual(au.settings_fingerprint(row), au.settings_fingerprint(other))
+
+    def test_merge_fills_empty_and_respects_newer_local(self):
+        teams = [
+            {"id": "team-1", "instructions": "", "updated_at": "2026-08-25T12:00:00.000Z"},
+            {"id": "team-2", "instructions": "Local edit.", "updated_at": "2026-08-25T12:00:00.000Z"},
+        ]
+        cloud = [
+            {
+                "team_id": "team-1",
+                "team_instructions": "From cloud.",
+                "updated_at": "2026-08-25T11:00:00.000Z",
+            },
+            {
+                "team_id": "team-2",
+                "team_instructions": "Cloud older.",
+                "updated_at": "2026-08-25T10:00:00.000Z",
+            },
+            {
+                "team_id": "nope",
+                "team_instructions": "Do not create me.",
+                "updated_at": "2026-08-25T13:00:00.000Z",
+            },
+        ]
+        self.assertTrue(au.apply_cloud_team_instructions(teams, cloud))
+        self.assertEqual(teams[0]["instructions"], "From cloud.")
+        self.assertEqual(teams[1]["instructions"], "Local edit.")
+        self.assertEqual(len(teams), 2)
+
+
+class CloudRuntimeTest(unittest.TestCase):
+    def test_overwrites_harness_and_keeps_stopped(self):
+        row = {
+            "agent_command": "goose.exe",
+            "agent_command_override": "x",
+            "agent_args": ["--foo"],
+            "acp_command": "buzz-acp",
+            "mcp_command": "mcp",
+            "model": "gpt-4",
+            "provider": "openai",
+            "is_active": True,
+        }
+        au.apply_cloud_runtime(row, "fizz", {"type": "provider", "id": "cloud", "config": {}})
+        self.assertEqual(row["backend"]["type"], "provider")
+        self.assertEqual(row["backend_agent_id"], "fizz")
+        self.assertEqual(row["agent_command"], "")
+        self.assertEqual(row["acp_command"], "")
+        self.assertEqual(row["mcp_command"], "")
+        self.assertEqual(row["agent_args"], [])
+        self.assertEqual(row["model"], "goose")
+        self.assertEqual(row["provider"], "litellm")
+        self.assertFalse(row["is_active"])
 
 
 if __name__ == "__main__":

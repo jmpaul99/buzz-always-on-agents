@@ -26,6 +26,9 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(ext["playwright"]["cmd"], "npx")
         self.assertIn("@playwright/mcp@latest", ext["playwright"]["args"])
         self.assertTrue(ext["developer"]["enabled"])
+        self.assertNotIn("memory", ext)
+        self.assertNotIn("chatrecall", ext)
+        self.assertNotIn("knowledgegraphmemory", ext)
         mcps = taskmcp.task_mcps(ext)
         self.assertIn("github", mcps)
         self.assertNotIn("developer", mcps)
@@ -45,10 +48,17 @@ class RecipeGenerateTest(unittest.TestCase):
             self.assertNotIn("reply", slugs)
             reply = (out / "reply" / "recipe.yaml").read_text(encoding="utf-8")
             self.assertIn("buzz messages send", reply)
-            self.assertIn("text instead of send", reply)
-            self.assertIn("exactly one channel reply", reply)
-            self.assertIn("Do all requested work first", reply)
+            self.assertIn("text-only assistant answer is not delivered", reply)
+            self.assertIn("Stop when the work is finished", reply)
+            self.assertNotIn("exactly one channel reply", reply)
+            self.assertNotIn("A second buzz messages send", reply)
+            self.assertIn("Do the requested work", reply)
             self.assertIn("status ping", reply)
+            self.assertIn("buzz --help", reply)
+            self.assertIn("draft-create", reply)
+            self.assertIn("canvas    get", reply)
+            self.assertIn("buzz mem", reply)
+            self.assertIn("never claim the agent exists", reply.lower())
             self.assertNotIn("name: todo", reply)
             self.assertNotIn("key: channel", reply)
             self.assertNotIn("key: author", reply)
@@ -56,6 +66,9 @@ class RecipeGenerateTest(unittest.TestCase):
             self.assertIn("max_turns: 25", reply)
             self.assertIn("name: developer", reply)
             self.assertNotIn("name: github", reply)
+            self.assertNotIn("\r", reply)
+            self.assertTrue(all(ord(ch) >= 32 or ch in "\n\t" for ch in reply))
+            self.assertNotIn("Quoted \\n", reply)
             github = (out / "github" / "recipe.yaml").read_text(encoding="utf-8")
             self.assertIn("name: github", github)
             self.assertIn("name: developer", github)
@@ -109,6 +122,13 @@ class RoutingTest(unittest.TestCase):
 
     def test_hello(self):
         self.assertIsNone(taskmcp.match_task_recipe("hello", self.catalog))
+
+    def test_memory_does_not_match_a_task_recipe(self):
+        self.assertIsNone(taskmcp.match_task_recipe("remember this in memory", self.catalog))
+        slugs = [row["slug"] for row in self.catalog]
+        self.assertNotIn("knowledgegraphmemory", slugs)
+        self.assertNotIn("memory", slugs)
+        self.assertNotIn("chatrecall", slugs)
 
 
 class CatalogFileTest(unittest.TestCase):

@@ -47,12 +47,19 @@ Schedules are ordinary Buzz YAML `on: schedule` posts that `@` an agent. The lis
 
 Agent **identity** (`nsec`) is created in Buzz Desktop. While this computer is online, a silent sidecar keeps Desktop cards and `/etc/buzz/*.env` in sync. **Every Desktop with the sidecar shares an access-filtered roster:** create on one machine is imported (card + nsec) on others where this Buzz user owns the agent, is on its allowlist, or anyone can message it. Delete on one machine undeploys GCP and drops the card everywhere it was synced.
 
-| Syncs | Does not sync |
-| --- | --- |
-| Create / delete (Desktop card ↔ `/etc/buzz/*.env` ↔ other Desktops) | Local harness / `agent_command` |
-| `system_prompt` | `is_active` / `runtime_pid` (stop Desktop Goose; cloud keeps listening) |
-| `respond_to` and `respond_to_allowlist` | Channel membership (relay; listener applies join/leave live) |
-| `team_id`, display name, `channel_allowlist` | Phone Buzz (no sidecar) |
+| Syncs (sidecar PUT/GET) | Relay-native (no sidecar JSON) | Does not sync |
+| --- | --- | --- |
+| Create / delete (Desktop card ↔ `/etc/buzz/*.env` ↔ other Desktops) | Core + cold memory (`buzz mem`, NIP-AE) | Phone Buzz (no sidecar) |
+| `system_prompt` | Channel canvas (`buzz canvas`) | Card `avatar_url`, `persona_id` |
+| `respond_to` and `respond_to_allowlist` | Huddle instructions (owner-signed, per channel) | Goose `skills` / `orchestrator` / `summon` |
+| `team_id`, team instruction text, display name, `channel_allowlist` | Thread / DM history (`buzz messages thread`) | Desktop/phone FUSE of the GCS workspace |
+| Cloud runtime labels on the card (`model=goose`, `provider=litellm`, provider backend) | Channel membership (listener join/leave live) | `is_active` / `runtime_pid` as a stop/start signal (cloud keeps listening) |
+
+Memories, canvas, huddle, and thread are fetched by the Goose worker at turn start (`tom.md`) and read/written through the Buzz CLI. Team instruction text is denormalized onto each cloud agent (`/etc/buzz/<slug>.team`) so a `teams.json` save PUTs every agent on that team.
+
+**Cloud Goose + LiteLLM are source of truth for model and harness.** The sidecar overwrites Desktop cards for cloud-tracked agents: provider backend, empty local `agent_command` / `acp_command` / `mcp_command`, `model=goose`, `provider=litellm`, `is_active=false`. Those fields are not sent to GCP (the worker is already pinned to `GOOSE_MODEL=goose`). Switching **Run on → this computer** is reverted on the next sidecar cycle. Stopping the card is not undeploy.
+
+Cloud agents share a ~3 GB `us-central1` GCS bucket mounted at `/mnt/buzz` (`agents/<slug>/`, `channels/<id>/`, and `shared/` for cross-channel files only). Desktop and phone do not mount it. Goose `HOME` stays under `/tmp`. Per-agent and per-channel trees are mkdir'd on that agent’s first turn in that channel.
 
 On Windows, `windows/install-path.ps1` installs the PATH plugin **and** a hidden logon task `BuzzCloudSync` (`pythonw`, `IgnoreNew`). On macOS, `macos/install-path.sh` installs the same plugin as `~/.local/bin/buzz-backend-cloud` and LaunchAgent `xyz.block.buzz.cloud-sync`. One silent sidecar per machine. Logs: `%APPDATA%\xyz.block.buzz.app\agents\cloud-sync.log` (Windows) or `~/Library/Application Support/xyz.block.buzz.app/agents/cloud-sync.log` (macOS).
 
@@ -64,7 +71,7 @@ That sidecar:
 4. Pulls the cloud roster first (import missing cards + nsecs; drop cards deleted elsewhere)
 5. PUTs local creates/edits and DELETEs pubkeys that vanished from this Desktop
 
-Deleting a Desktop card undeploys that agent on GCP **and** removes it from other Desktops. Stopping the Desktop card does **not**. The Desktop create wizard still asks for a local harness; cloud Goose does not use it — switch **Run on → cloud** and leave the local process stopped. Imported cards arrive already set to cloud and stopped.
+Deleting a Desktop card undeploys that agent on GCP **and** removes it from other Desktops. Stopping the Desktop card does **not**. The Desktop create wizard still asks for a local harness; cloud Goose does not use it — the sidecar overwrites the card to **Run on → cloud** / Goose+LiteLLM and leaves the local process stopped. Imported cards arrive already set to cloud and stopped.
 
 One-shot fallback: `.\windows\sync-agent-instructions.ps1` or `./macos/sync-agent-instructions.sh` (`buzz-cloud-sync.py --once`).
 

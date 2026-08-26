@@ -2,7 +2,7 @@
 
 Files here are copied into the Goose worker image at `/home/goose/.config/goose/` (and recipes under `/home/goose/recipes`). Desktop Goose config is **not** used in the cloud.
 
-Stay within **5 enabled extensions and ~50 tools**. Extra MCPs eat the context window and make tool choice worse. See [`guardrails.md`](guardrails.md) (injected every turn via Top of Mind / `GOOSE_MOIM_MESSAGE_FILE`).
+Stay within **5 enabled extensions and ~50 tools**. Extra MCPs eat the context window and make tool choice worse. See [`guardrails.md`](guardrails.md) (injected every turn via Top of Mind / `GOOSE_MOIM_MESSAGE_FILE`, concatenated with standing context in `tom.md`).
 
 ## Always-on vs task MCPs
 
@@ -12,20 +12,30 @@ Always-on (3 in the generated recipe; todo is omitted so Goose cannot add a seco
 | --- | --- | --- |
 | `developer` | developer | Files + shell (`buzz messages send` lives here) |
 | `extensionmanager` | Extension Manager | Enable/disable the rest |
-| `tom` | Top of Mind | Injects `guardrails.md` every turn |
+| `tom` | Top of Mind | Injects `tom.md` (guardrails + standing context) every turn |
+
+Intentionally **removed** from this image (not merely disabled — Extension Manager cannot turn them on):
+
+- Goose `memory` (builtin)
+- `chatrecall` (platform)
+- `knowledgegraphmemory` (stdio `@modelcontextprotocol/server-memory`)
+
+Durable facts go through `buzz mem`. Core is injected as `[Agent Memory — core]` when the worker can fetch it.
 
 Intentionally **off** in cloud:
 
 - `todo` — extra LLM turn after send; duplicates the channel reply
 - `code_execution` (Code Mode) — was emitting shell calls without a `command` field; cloud has no approval UI
 - `scheduler` — Buzz YAML `on: schedule` is the scheduler
-- `skills`, `orchestrator`, `summon`, `chatrecall`, `memory`, Computer Controller, Apps, etc.
+- `skills`, `orchestrator`, `summon`, Computer Controller, Apps, etc.
 
 `SECURITY_PROMPT_ENABLED: false` — cloud has no approval UI; that flag would park shell tools (including send) forever.
 
 Provider: `litellm` / model `goose` / `LITELLM_HOST=http://127.0.0.1:4000`. Telemetry off. Thinking effort `low` (so Agent Activity gets reasoning). Mode `auto`. Keyring disabled. `GOOSE_CLI_SHOW_THINKING=1`.
 
-Generic mentions use the generated `reply` recipe (`instructions` = send contract, `prompt` = `{{ message }}`, `settings.max_turns: 25`). Task-MCP recipes share that contract and add one extra extension. Do not use `goose run -t` on the mention path.
+Generic mentions use the generated `reply` recipe (`instructions` = send contract + Buzz CLI table, `prompt` = `{{ message }}`, `settings.max_turns: 25`). Task-MCP recipes share that contract and add one extra extension. Do not use `goose run -t` on the mention path.
+
+Goose is a Buzz CLI power user (`buzz --help` allowed): `mem`, `canvas`, `channels`, `dms`, `users`, `huddle`, `messages get/thread/search`, `agents draft-create` / `draft-update` (do not claim the agent exists until the owner saves in Desktop), plus the rest. Post user-visible updates with `buzz messages send`. Stop when the work is finished.
 
 ## Task MCPs (default off)
 
@@ -37,7 +47,6 @@ Listed in `config.yaml` so Extension Manager can enable them, and so [`generate_
 | `containeruse` | stdio mcp-remote | container-use.com |
 | `github` | streamable HTTP | `GITHUB_PERSONAL_ACCESS_TOKEN` |
 | `goosedocs` | stdio mcp-remote | block.gitmcp.io/goose |
-| `knowledgegraphmemory` | stdio memory server | Persistent graph in the container |
 | `linuxmcpserver` | stdio `uvx linux-mcp-server` | |
 | `playwright` | stdio `@playwright/mcp` | Chromium already in the image. **Not for Google login.** |
 | `repomix` | stdio | |
@@ -94,8 +103,8 @@ Do not hand-write task recipes unless you are debugging generation. The default 
 
 ## `.goosehints`
 
-Short standing instructions: this is not an application repo; reply with `buzz messages send`; Playwright is for public pages, not Google login; reactions go through `buzz reactions` on the mention event.
+Short standing instructions: GCS workspace at `/mnt/buzz` (`agents/`, `channels/`, `shared/`); reply with `buzz messages send`; full Buzz CLI including `--help`; Playwright is for public pages, not Google login; reactions go through `buzz reactions` on the mention event.
 
 ## Guardrails (Top of Mind)
 
-[`guardrails.md`](guardrails.md) is the every-turn reminder: 5 extensions / 50 tools, always-on set, enable-then-discover, never invent tool names, never dump env, never enable Code Mode.
+[`guardrails.md`](guardrails.md) is copied into every-turn `tom.md` with standing sections (core memory, team instructions, huddle, canvas metadata, thread, workspace). Reminder: 5 extensions / 50 tools, always-on set, enable-then-discover, never invent tool names, never dump env, never enable Code Mode, `buzz mem` only for durable facts.

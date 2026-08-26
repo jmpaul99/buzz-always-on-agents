@@ -16,7 +16,8 @@ $apis = @(
     "iap.googleapis.com",
     "iam.googleapis.com",
     "cloudbuild.googleapis.com",
-    "cloudresourcemanager.googleapis.com"
+    "cloudresourcemanager.googleapis.com",
+    "storage.googleapis.com"
 )
 Invoke-Gcloud services enable @apis --project $Project --quiet
 
@@ -68,3 +69,14 @@ if (-not $projectNumber) { throw "could not resolve project number for $Project"
 $cbSa = "${projectNumber}@cloudbuild.gserviceaccount.com"
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$cbSa" --role="roles/artifactregistry.writer" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$cbSa" --role="roles/logging.logWriter" --quiet --condition=None
+
+$bucket = $C.WORKSPACE_BUCKET
+if ([string]::IsNullOrWhiteSpace($bucket)) {
+    $bucket = "buzz-goose-workspace-$Project"
+}
+Write-Host "workspace bucket=$bucket (~3 GB target; GCS has no hard quota)"
+& gcloud storage buckets describe "gs://$bucket" --project $Project 1>$null 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Invoke-Gcloud storage buckets create "gs://$bucket" --project $Project --location $Region --uniform-bucket-level-access
+}
+Invoke-Gcloud storage buckets add-iam-policy-binding "gs://$bucket" --member="serviceAccount:$gooseEmail" --role="roles/storage.objectAdmin" --project $Project --quiet
