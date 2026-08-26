@@ -22,7 +22,7 @@ from typing import Any
 
 from activity import GooseActivityParser, redact
 from agenthome import sync_agent_home
-from observer import ObserverPublisher
+from observer import ObserverPublisher, WAIT_READY_SECS, warm_observer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("goose-worker")
@@ -30,7 +30,7 @@ log = logging.getLogger("goose-worker")
 PORT = int(os.environ.get("PORT", "8080"))
 GOOSE_TIMEOUT = int(os.environ.get("GOOSE_TIMEOUT_SECS", "1500"))
 GOOSE_IDLE_TIMEOUT = int(os.environ.get("GOOSE_IDLE_TIMEOUT_SECS", "180"))
-REPLY_GRACE_SECS = 20  # idle after last activity once the channel reply landed
+REPLY_GRACE_SECS = 5  # stop soon after the first channel send so Goose cannot double-post
 LIVENESS_SECS = 10
 SEND_TIMEOUT_SECS = 45
 FALLBACK_REPLY = (
@@ -205,10 +205,7 @@ def recipe_params(env: dict[str, str], prompt: str = "") -> dict[str, str]:
     return {
         "identity": (env.get("BUZZ_IDENTITY") or "").strip() or "You are a Buzz cloud agent.",
         "message": message,
-        "channel": channel or "unknown",
         "send_cmd": send_cmd or "buzz messages send --content '...'",
-        "author": (env.get("BUZZ_AUTHOR_PUBKEY") or "").strip() or "unknown",
-        "event_id": (env.get("BUZZ_EVENT_ID") or "").strip() or "unknown",
     }
 
 
@@ -223,6 +220,7 @@ def build_goose_cmd(
         "goose",
         "run",
         "--no-session",
+        "--quiet",
         "--output-format",
         "stream-json",
     ]
@@ -236,7 +234,7 @@ def build_goose_cmd(
         values = dict(params or {})
         values.setdefault("message", prompt)
         values.setdefault("send_cmd", "buzz messages send --content '...'")
-        for key in ("identity", "message", "channel", "send_cmd", "author", "event_id"):
+        for key in ("identity", "message", "send_cmd"):
             val = values.get(key)
             if val is None:
                 continue
@@ -296,6 +294,13 @@ def _run_goose(turn: Turn) -> None:
     _rewrite_relay(env)
     prompt = turn.prompt or env.get("PROMPT") or "Reply that the Goose worker received an empty prompt."
     env["PROMPT"] = prompt[:MAX_PROMPT]
+    # Socket was warmed at /run. Home sync overlaps leftover AUTH. Then wait
+    # so activity is live before Goose can send — wait_ms should be ~0 when
+    # the shared socket is already ready.
+    observer = ObserverPublisher(env)
+    observer.emit_turn_started()
+    started = time.monotonic()
+    activity = _Activity()
     env["GOOSE_DISABLE_SESSION_NAMING"] = "true"
     env["GOOSE_DISABLE_KEYRING"] = "1"
     env.setdefault("GOOSE_MAX_TURNS", "25")
@@ -311,10 +316,14 @@ def _run_goose(turn: Turn) -> None:
     guardrails = home / ".config" / "goose" / "guardrails.md"
     if guardrails.is_file():
         env["GOOSE_MOIM_MESSAGE_FILE"] = str(guardrails)
-    started = time.monotonic()
-    activity = _Activity()
-    observer = ObserverPublisher(env)
-    observer.emit_turn_started()
+    wait_t = time.monotonic()
+    ready = observer.wait_ready(WAIT_READY_SECS)
+    log.info(
+        "observer wait ready=%s wait_ms=%.0f agent=%s",
+        ready,
+        (time.monotonic() - wait_t) * 1000,
+        turn.agent,
+    )
     log.info("goose start agent=%s recipe=%s", turn.agent, env.get("GOOSE_RECIPE") or "-")
     replied = threading.Event()
     parser = GooseActivityParser(
@@ -527,6 +536,7 @@ class Handler(BaseHTTPRequestHandler):
         recipe = str(req.get("recipe") or env.get("GOOSE_RECIPE") or "")[:64]
         if recipe:
             env["GOOSE_RECIPE"] = recipe
+        warm_observer(env)
         turn = Turn(agent, env, prompt or env.get("PROMPT", ""))
         if not _submit(turn, GOOSE_TIMEOUT + 30):
             self._send(504, {"ok": False, "error": "queue wait timed out", "agent": agent})

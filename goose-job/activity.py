@@ -24,7 +24,15 @@ TOOL_START_RE = re.compile(r"^▸\s+(\S+)\s*(.*)$")
 SEP_RE = re.compile(r"^─{8,}\s*$")
 BANNER_RE = re.compile(
     r"goose is ready|new session|litellm goose|/tmp/goose-|"
-    r"^\( O\)>|^__\)|^L L |^Copy code block",
+    r"^\( O\)>|^__\)|^L L |^Copy code block|"
+    r"loading recipe:|parameters used to load this recipe|"
+    r"^description:\s|default buzz mention|"
+    r"^channel:\s|^author:\s|^send_cmd:\s|^event_id:\s|^identity:\s",
+    re.I,
+)
+RECIPE_DUMP_RE = re.compile(
+    r"loading recipe:|parameters used to load this recipe|"
+    r"default buzz mention: do the work",
     re.I,
 )
 SKIP_TOOLS: set[str] = set()
@@ -172,7 +180,7 @@ def _is_banner(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return True
-    if BANNER_RE.search(stripped):
+    if BANNER_RE.search(stripped) or RECIPE_DUMP_RE.search(stripped):
         return True
     if set(stripped) <= set("─━│┌┐└┘╭╮╰╯▸●()|_/\\ "):
         return True
@@ -432,17 +440,20 @@ class GooseActivityParser:
         command = (args or {}).get("command") or ""
         if command:
             self.last_command = command[:80]
+        skip = name.lower() in SKIP_TOOLS or bool(SKIP_COMMAND_RE.search(command))
         tool = _OpenTool(
             tool_id=tool_id,
             name=name,
             args=dict(args or {}),
-            skip=name.lower() in SKIP_TOOLS,
+            skip=skip,
             tui=tui,
         )
         self._open[tool_id] = tool
         if tui:
             self._tui_id = tool_id
-        if not tool.skip:
+        # TUI prints `▸ shell` before `command:`. Wait for the command so we
+        # can hide --help / env dumps instead of flashing a tool card.
+        if not tool.skip and not (tui and not command):
             self._emit_tool(tool, "executing")
 
     def _tool_line(self, raw: str) -> None:
@@ -457,7 +468,11 @@ class GooseActivityParser:
                 tool.args[key] = redact(val)[:500]
                 if key == "command":
                     self.last_command = tool.args[key][:80]
-                if tool.emitted:
+                    if SKIP_COMMAND_RE.search(tool.args[key]):
+                        tool.skip = True
+                if tool.skip:
+                    return
+                if tool.emitted or key == "command":
                     self._emit_tool(tool, "executing")
                 return
         if raw.strip():

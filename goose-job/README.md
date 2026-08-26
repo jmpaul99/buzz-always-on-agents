@@ -79,11 +79,11 @@ Activity is Goose stdout **or** LiteLLM sidecar `/activity` (`in_flight > 0`). L
 - If `GOOSE_RECIPE` matches `/home/goose/recipes/<slug>/recipe.yaml`, run `goose run --recipe … --params message=…` (task MCP already enabled in that recipe).
 - Else the generated `reply` recipe (always-on extensions + send-required instructions). `-t` is only a last resort if that file is missing.
 
-Always `--no-session --output-format stream-json` (not `--quiet`, so thoughts stay on the wire). `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low` so Desktop Agent Activity gets reasoning + tools.
+Always `--no-session --quiet --output-format stream-json`. Quiet drops recipe-load TUI; stream-json still carries thoughts/tools. `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low`.
 
 ## Observer (kind 24200)
 
-`observer.py` opens a **separate** WSS to the relay (kind 24200 is ephemeral; HTTP publish is rejected). Frames are NIP-44 encrypted to the owner (`auth` tag), tagged `agent=<pubkey> frame=telemetry p=<owner>`.
+`observer.py` keeps **one WSS per agent** (kind 24200 is ephemeral; HTTP publish is rejected). TLS + NIP-42 AUTH start as soon as `/run` arrives (before the per-agent queue). Goose waits until AUTH so activity is live before the channel reply; that wait is usually ~0 because AUTH overlapped the queue + home sync, and follow-up DMs reuse the socket. Idle sockets (Cloud Run pauses CPU between requests) reconnect on the next `/run` instead of failing mid-turn. Logs `tls_ms`, `auth_ms`, `ready_ms`, `wait_ms`, and `first_flush lag_ms`. Frames are NIP-44 encrypted to the owner (`auth` tag), tagged `agent=<pubkey> frame=telemetry p=<owner>`.
 
 `activity.py` turns Goose CLI / `stream-json` into compact thought + tool_call events. nsecs and `BUZZ_PRIVATE_KEY=…` style assignments are redacted. Desktop Agent Activity decrypts these.
 

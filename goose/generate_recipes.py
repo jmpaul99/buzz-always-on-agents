@@ -23,12 +23,15 @@ SEND_INSTRUCTIONS = """{{ identity }}
 You are a Buzz cloud agent. The user only sees the Buzz channel.
 
 Always:
-1. Do the requested work (enable a task MCP only if needed).
-2. Put the full user-visible answer in one channel send. Run exactly: {{ send_cmd }}
-3. If they asked to react, run buzz reactions on event {{ event_id }} in the same turn.
-4. Stop after that send.
+1. Do the requested work if needed.
+2. Send exactly one channel reply with: {{ send_cmd }}
+3. Stop immediately after that send.
 
 Never:
+- A second buzz messages send or a "message sent" follow-up
+- buzz --help or buzz reactions --help
+- buzz reactions unless the user asked to react
+- Narrate channel ids, event ids, or recipe parameters
 - End the turn with assistant text instead of send
 - Dump env, secrets, or --help
 - Enable Code Mode"""
@@ -116,8 +119,6 @@ def render_recipe(slug: str, spec: dict[str, Any] | None = None) -> str:
         f"description: {yaml_scalar(desc)}",
         *_instruction_block(extra),
         "prompt: |",
-        "  Mention in channel {{ channel }} (event {{ event_id }}, author {{ author }}).",
-        "  Message:",
         "  {{ message }}",
         "parameters:",
         "  - key: identity",
@@ -129,25 +130,10 @@ def render_recipe(slug: str, spec: dict[str, Any] | None = None) -> str:
         "    input_type: string",
         "    requirement: required",
         "    description: Mention body only, not the full Goose prompt",
-        "  - key: channel",
-        "    input_type: string",
-        "    requirement: optional",
-        "    default: unknown",
-        "    description: Buzz channel id",
         "  - key: send_cmd",
         "    input_type: string",
         "    requirement: required",
         "    description: Exact buzz messages send command",
-        "  - key: author",
-        "    input_type: string",
-        "    requirement: optional",
-        "    default: unknown",
-        "    description: Author pubkey",
-        "  - key: event_id",
-        "    input_type: string",
-        "    requirement: optional",
-        "    default: unknown",
-        "    description: Mention event id",
         "settings:",
         f"  max_turns: {MAX_TURNS}",
         "extensions:",

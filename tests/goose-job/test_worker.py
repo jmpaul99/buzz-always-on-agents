@@ -71,14 +71,14 @@ class GooseCmdTest(unittest.TestCase):
             self.assertIn("--recipe", cmd)
             self.assertEqual(cmd[cmd.index("--recipe") + 1], str(dest / "recipe.yaml"))
             self.assertNotIn("-t", cmd)
-            self.assertNotIn("--quiet", cmd)
+            self.assertIn("--quiet", cmd)
 
     def test_text_when_no_recipe_file(self):
         cmd = build_goose_cmd("hello", "", recipe_root=Path("/missing"))
         self.assertIn("-t", cmd)
         self.assertEqual(cmd[cmd.index("-t") + 1], "hello")
         self.assertNotIn("--recipe", cmd)
-        self.assertNotIn("--quiet", cmd)
+        self.assertIn("--quiet", cmd)
 
 
 class RecipeParamTest(unittest.TestCase):
@@ -99,8 +99,10 @@ class RecipeParamTest(unittest.TestCase):
             "You are Health.\n\nYou were mentioned in channel chan-1.\nSend with: buzz",
         )
         self.assertEqual(params["message"], "Test guy")
-        self.assertEqual(params["channel"], "chan-1")
         self.assertIn("messages send", params["send_cmd"])
+        self.assertNotIn("channel", params)
+        self.assertNotIn("author", params)
+        self.assertNotIn("event_id", params)
 
     def test_recipe_argv_stays_single_line(self):
         with tempfile.TemporaryDirectory() as raw:

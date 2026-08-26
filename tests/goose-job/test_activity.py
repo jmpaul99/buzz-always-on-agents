@@ -387,6 +387,28 @@ class GooseActivityParserTest(unittest.TestCase):
         self.assertTrue(replied)
         self.assertTrue(parser.replied)
 
+    def test_recipe_load_banner_is_not_a_thought(self):
+        events, _ = collect(
+            "Loading recipe: Buzz reply\n"
+            "Description: Default Buzz mention: do the work, then send on the channel\n"
+            "Parameters used to load this recipe:\n"
+            "channel: 9b6babd2-4046-4a91-beea-aa3d9ab190d8\n"
+            "I'll send a short reply.\n"
+        )
+        thoughts = [
+            e.get("content", {}).get("text")
+            for e in events
+            if isinstance(e, dict) and e.get("sessionUpdate") == "agent_thought_chunk"
+        ]
+        self.assertEqual(thoughts, ["I'll send a short reply."])
+
+    def test_help_command_is_hidden(self):
+        events, _ = collect(
+            "▸ shell\ncommand: buzz reactions --help\n"
+            '{"accepted":true}\n'
+        )
+        self.assertEqual(tools(events), [])
+
     def test_messages_send_still_marks_replied(self):
         _events, replied = collect(
             "▸ shell\ncommand: buzz messages send --channel x hello\n"
