@@ -2,7 +2,37 @@
 # LLM classifier is off (heuristic + keyword rules). Classifier can be added later.
 
 model_list:
-  # --- NIM (shared ~40 RPM nvapi- wallet) ---
+  # --- NIM agentic (shared ~40 RPM nvapi- wallet) ---
+  - model_name: glm
+    litellm_params:
+      model: nvidia_nim/z-ai/glm-5.2
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: glm
+  - model_name: kimi
+    litellm_params:
+      model: nvidia_nim/moonshotai/kimi-k2.6
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: kimi
+  - model_name: deepseek-pro
+    litellm_params:
+      model: nvidia_nim/deepseek-ai/deepseek-v4-pro
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: deepseek-pro
+  - model_name: minimax-m27
+    litellm_params:
+      model: nvidia_nim/minimaxai/minimax-m2.7
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: minimax-m27
+
+  # --- NIM fallbacks (same wallet; not tier leaders) ---
   - model_name: nemotron
     litellm_params:
       model: nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
@@ -40,7 +70,8 @@ model_list:
       id: step-flash
 
   # --- Groq (own org limits) ---
-  # 120B is the greeting/default: 20B skips buzz messages send.
+  # groq-qwen is the greeting/default (parallel tools). 120B has no parallel
+  # tool use. 20B skips buzz messages send — keep for manual curls only.
   - model_name: groq-fast
     litellm_params:
       model: groq/openai/gpt-oss-120b
@@ -77,7 +108,29 @@ model_list:
     model_info:
       id: gemini-lite
 
-  # --- OpenRouter last-resort (not in complexity tiers) ---
+  # --- OpenRouter last-resort (pinned agent models; not in complexity tiers) ---
+  - model_name: or-ox
+    litellm_params:
+      model: openrouter/stealth/ox-alpha
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+    model_info:
+      id: or-ox
+  - model_name: or-ultra
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+    model_info:
+      id: or-ultra
+  - model_name: or-laguna-s
+    litellm_params:
+      model: openrouter/poolside/laguna-s-2.1:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+    model_info:
+      id: or-laguna-s
+  # Manual curls only — skip tools too often for Goose.
   - model_name: openrouter-free
     litellm_params:
       model: openrouter/openrouter/free
@@ -104,10 +157,10 @@ model_list:
       drop_params: true
       complexity_router_config:
         tiers:
-          SIMPLE: [groq-fast, groq-qwen, gemini-flash]
-          MEDIUM: [groq-qwen, gemini-flash, nemotron, deepseek-flash]
-          COMPLEX: [minimax, laguna, step-flash, gemini-flash]
-          REASONING: [step-flash, gemini-flash]
+          SIMPLE: [groq-qwen, groq-fast, gemini-flash]
+          MEDIUM: [groq-qwen, gemini-flash, glm, kimi]
+          COMPLEX: [glm, kimi, deepseek-pro, minimax-m27]
+          REASONING: [glm, kimi, gemini-flash]
         adaptive: true
         session_affinity: true
         session_affinity_ttl_seconds: 3600
@@ -131,8 +184,8 @@ model_list:
         # (merge_extension_keywords.py) so routing stays extension-agnostic.
         custom_technical_keywords:
           [buzz, nostr, nsec, relay, systemd, aarch64, kubernetes, postgres]
-        default_model: groq-fast
-      complexity_router_default_model: groq-fast
+        default_model: groq-qwen
+      complexity_router_default_model: groq-qwen
 
 router_settings:
   routing_strategy: simple-shuffle
@@ -143,20 +196,23 @@ router_settings:
   enable_pre_call_checks: true
   optional_pre_call_checks: [deployment_affinity, session_affinity]
   deployment_affinity_ttl_seconds: 3600
-  timeout: 120
+  timeout: 240
   default_fallbacks:
-    - groq-fast
     - groq-qwen
     - gemini-flash
+    - glm
+    - kimi
+    - groq-fast
+    - deepseek-pro
+    - minimax-m27
+    - laguna
     - nemotron
+    - step-flash
     - deepseek-flash
     - minimax
-    - laguna
-    - step-flash
-    - gemini-lite
-    - groq-20b
-    - openrouter-free
-    - openrouter-cheap
+    - or-ox
+    - or-ultra
+    - or-laguna-s
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

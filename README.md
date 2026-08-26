@@ -157,7 +157,7 @@ curl http://127.0.0.1:8080/v1/chat/completions ...
 
 - e2-micro compute: $0 on the free tier. Ephemeral IPv4: ~$3.65/mo.
 - Cloud Run goose-worker + LiteLLM: $0 until you exceed the free allowances (Goose image is 2 vCPU / 4 Gi; LiteLLM is 1 vCPU / 2 Gi).
-- Tokens: NIM / Groq / Gemini / OpenRouter bill their own accounts. All have rate limited free tiers. LiteLLM will switch between them so once one API hits its limit, it will switch you to another. Openrouter is configured to use it's lowest cost models as an absolute fall back if all are rate limited.
+- Tokens: NIM / Groq / Gemini / OpenRouter bill their own accounts. All have rate limited free tiers. LiteLLM will switch between them so once one API hits its limit, it will switch you to another. OpenRouter last-resort is pinned free agent models, not the random free router.
 
 A daily systemd timer (`buzz-keepalive`) burns a little CPU and outbound traffic so the free e2-micro is not idle-reclaimed.
 

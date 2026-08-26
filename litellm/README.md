@@ -10,10 +10,10 @@ Goose is configured with `GOOSE_PROVIDER=litellm` and `GOOSE_MODEL=goose`. That 
 
 | Tier | Models (order = preference / shuffle pool) |
 | --- | --- |
-| SIMPLE | `groq-fast` (gpt-oss-120b), `groq-qwen`, `gemini-flash` |
-| MEDIUM | `groq-qwen`, `gemini-flash`, `nemotron`, `deepseek-flash` |
-| COMPLEX | `minimax`, `laguna`, `step-flash`, `gemini-flash` |
-| REASONING | `step-flash`, `gemini-flash` |
+| SIMPLE | `groq-qwen` (qwen3.6-27b, parallel tools), `groq-fast` (gpt-oss-120b), `gemini-flash` |
+| MEDIUM | `groq-qwen`, `gemini-flash`, `glm` (GLM-5.2), `kimi` (Kimi K2.6) |
+| COMPLEX | `glm`, `kimi`, `deepseek-pro`, `minimax-m27` |
+| REASONING | `glm`, `kimi`, `gemini-flash` |
 
 Keyword shortcuts:
 
@@ -21,7 +21,7 @@ Keyword shortcuts:
 - COMPLEX: `refactor`, `implement`, `debug`, `traceback`, `compile`, `function`
 - REASONING: `step by step`, `reason`, `architecture`, `tradeoff`, `prove`
 
-Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed asks like “write a poem and react” stay MEDIUM. Token threshold `complex: 400`. Adaptive routing + session affinity (1h) are on. Default model: `groq-fast` (`gpt-oss-120b`). `gemini-lite` and `groq-20b` are fallback-only — they skip tool calls too often for greetings.
+Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed asks like “write a poem and react” stay MEDIUM. Token threshold `complex: 400`. Adaptive routing + session affinity (1h) are on. Default model: `groq-qwen` (`qwen3.6-27b`) so greetings still emit `buzz messages send`. SIMPLE stays on Groq/Gemini so it does not burn the shared NIM ~40 RPM wallet. `gemini-lite`, `groq-20b`, `openrouter-free`, and `openrouter-cheap` stay in `model_list` for manual curls but are **not** on the Goose fallback chain — they skip tool calls too often.
 
 `custom_technical_keywords` starts with Buzz/infra terms (`buzz`, `nostr`, `nsec`, `relay`, …). **Disabled Goose extension names are appended at image build** by `merge_extension_keywords.py` so adding an MCP in `goose/config.yaml` automatically steers those mentions toward COMPLEX without a hand-maintained list.
 
@@ -29,9 +29,9 @@ Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed 
 
 `router_settings.default_fallbacks` after allowed_fails=1 / 30s cooldown / 2 retries:
 
-`groq-fast` → `groq-qwen` → `gemini-flash` → `nemotron` → `deepseek-flash` → `minimax` → `laguna` → `step-flash` → `gemini-lite` → `groq-20b` → `openrouter-free` → `openrouter-cheap`
+`groq-qwen` → `gemini-flash` → `glm` → `kimi` → `groq-fast` → `deepseek-pro` → `minimax-m27` → `laguna` → `nemotron` → `step-flash` → `deepseek-flash` → `minimax` → `or-ox` → `or-ultra` → `or-laguna-s`
 
-OpenRouter is last-resort only (not in complexity tiers). `openrouter-cheap` uses OpenRouter’s auto-router at `cost_tier: low`.
+OpenRouter is last-resort only (not in complexity tiers). Pinned free slugs: `stealth/ox-alpha`, `nvidia/nemotron-3-ultra-550b-a55b:free`, `poolside/laguna-s-2.1:free`. NIM Flash/XS/Lightning/M3/Step stay as named fallbacks, not tier leaders.
 
 ## Providers and secrets
 
@@ -80,4 +80,4 @@ curl http://127.0.0.1:8080/v1/chat/completions ^
   -d "{\"model\":\"goose\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
 ```
 
-Timeout for completions is 120s (`router_settings.timeout` and Goose `LITELLM_TIMEOUT`).
+Timeout for completions is 240s (`router_settings.timeout` and Goose `LITELLM_TIMEOUT`).

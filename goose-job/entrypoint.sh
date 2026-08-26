@@ -8,7 +8,7 @@ export GOOSE_DISABLE_KEYRING=1
 export GOOSE_TELEMETRY_ENABLED=false
 export LITELLM_HOST="http://127.0.0.1:4000"
 export LITELLM_BASE_PATH="${LITELLM_BASE_PATH:-v1/chat/completions}"
-export LITELLM_TIMEOUT="${LITELLM_TIMEOUT:-120}"
+export LITELLM_TIMEOUT="${LITELLM_TIMEOUT:-240}"
 if [[ "${BUZZ_RELAY_URL:-}" == wss://* ]]; then
   export BUZZ_RELAY_URL="https://${BUZZ_RELAY_URL#wss://}"
 elif [[ "${BUZZ_RELAY_URL:-}" == ws://* ]]; then
