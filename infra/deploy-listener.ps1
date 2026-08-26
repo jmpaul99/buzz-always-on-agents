@@ -33,16 +33,6 @@ if ($LASTEXITCODE -ne 0) {
         --allow=tcp:8743 --source-ranges=35.235.240.0/20 --target-tags=$($C.IAP_TAG) `
         --description="IAP TCP tunnel to listener control API"
 }
-$subnetCidr = (& gcloud compute networks subnets describe default --region $Region --project $Project --format="value(ipCidrRange)" 2>$null).Trim()
-if ($subnetCidr) {
-    & gcloud compute firewall-rules describe allow-goose-worker-8743 --project $Project 1>$null 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "creating allow-goose-worker-8743 (Direct VPC to listener)"
-        Invoke-Gcloud compute firewall-rules create allow-goose-worker-8743 --project $Project `
-            --allow=tcp:8743 --source-ranges=$subnetCidr --target-tags=$($C.IAP_TAG) `
-            --description="Cloud Run Direct VPC to listener control API"
-    }
-}
 
 $tmp = "/tmp/buzz-listener-src"
 & gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "rm -rf $tmp && mkdir -p $tmp"
@@ -50,44 +40,80 @@ Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap `
     (Join-Path $listenerDir "listener.py") `
     (Join-Path $listenerDir "agentutil.py") `
     (Join-Path $listenerDir "seen.py") `
-    (Join-Path $listenerDir "taskmcp.py") `
-    (Join-Path $listenerDir "task-mcps.json") `
+    (Join-Path $listenerDir "mcp_catalog.py") `
+    (Join-Path $listenerDir "mcp-catalog.json") `
+    (Join-Path $listenerDir "litellm_proxy.py") `
+    (Join-Path $listenerDir "cloud_agents.py") `
     (Join-Path $listenerDir "nostrutil.py") `
     (Join-Path $listenerDir "requirements.txt") `
     (Join-Path $listenerDir "add-agent.sh") `
     (Join-Path $listenerDir "remove-agent.sh") `
+    (Join-Path $listenerDir "run-acp.sh") `
     (Join-Path $listenerDir "keepalive.sh") `
     (Join-Path $listenerDir "buzz-listener.service") `
+    (Join-Path $listenerDir "buzz-acp@.service") `
+    (Join-Path $listenerDir "buzz-litellm-proxy.service") `
     (Join-Path $listenerDir "buzz-keepalive.service") `
     (Join-Path $listenerDir "buzz-keepalive.timer") `
     "${inst}:${tmp}/"
+
+$adcSrc = Join-Path $Root "goose\local-mcp\google_adc_mcp.py"
+if (Test-Path -LiteralPath $adcSrc) {
+    Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $adcSrc "${inst}:${tmp}/google_adc_mcp.py"
+}
 
 $remote = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip curl
-install -d -m 755 /opt/buzz-listener /var/lib/buzz-listener
+apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates tar
+install -d -m 755 /opt/buzz-listener /var/lib/buzz-listener /opt/sprig /opt/buzz/local-mcp
 install -d -m 700 /etc/buzz
-cp /tmp/buzz-listener-src/*.py /tmp/buzz-listener-src/requirements.txt /tmp/buzz-listener-src/task-mcps.json /opt/buzz-listener/
+cp /tmp/buzz-listener-src/*.py /tmp/buzz-listener-src/requirements.txt /tmp/buzz-listener-src/mcp-catalog.json /opt/buzz-listener/
+if [ -f /tmp/buzz-listener-src/google_adc_mcp.py ]; then
+  install -m 644 /tmp/buzz-listener-src/google_adc_mcp.py /opt/buzz/local-mcp/google_adc_mcp.py
+fi
 install -m 755 /tmp/buzz-listener-src/add-agent.sh /opt/buzz-listener/add-agent.sh
 install -m 755 /tmp/buzz-listener-src/remove-agent.sh /opt/buzz-listener/remove-agent.sh
+install -m 755 /tmp/buzz-listener-src/run-acp.sh /opt/buzz-listener/run-acp.sh
 install -m 755 /tmp/buzz-listener-src/keepalive.sh /opt/buzz-listener/keepalive.sh
+sed -i 's/\r$//' /opt/buzz-listener/*.sh /opt/buzz-listener/cloud_agents.py
+chmod +x /opt/buzz-listener/cloud_agents.py
+ln -sfn /opt/buzz-listener/cloud_agents.py /usr/local/bin/buzz-cloud-agents
 install -m 644 /tmp/buzz-listener-src/buzz-listener.service /etc/systemd/system/buzz-listener.service
+install -m 644 /tmp/buzz-listener-src/buzz-acp@.service /etc/systemd/system/buzz-acp@.service
+install -m 644 /tmp/buzz-listener-src/buzz-litellm-proxy.service /etc/systemd/system/buzz-litellm-proxy.service
 install -m 644 /tmp/buzz-listener-src/buzz-keepalive.service /etc/systemd/system/buzz-keepalive.service
 install -m 644 /tmp/buzz-listener-src/buzz-keepalive.timer /etc/systemd/system/buzz-keepalive.timer
+SPRIG_URL="https://github.com/block/buzz/releases/download/sprig-latest/sprig-x86_64-unknown-linux-musl.tar.gz"
+rm -rf /tmp/sprig && mkdir -p /tmp/sprig && cd /tmp/sprig
+curl -fsSL "$SPRIG_URL" -o sprig.tar.gz
+tar -xzf sprig.tar.gz
+SRC=$(find . -type f \( -name sprig -o -name buzz-acp -o -name buzz \) | head -n1)
+install -m 755 "$SRC" /opt/sprig/sprig
+ln -sfn /opt/sprig/sprig /opt/sprig/buzz
+ln -sfn /opt/sprig/sprig /opt/sprig/buzz-acp
+ln -sfn /opt/sprig/sprig /opt/sprig/buzz-agent
+ln -sfn /opt/sprig/sprig /opt/sprig/buzz-dev-mcp
+ln -sfn /opt/sprig/sprig /usr/local/bin/buzz
+ln -sfn /opt/sprig/sprig /usr/local/bin/buzz-acp
+ln -sfn /opt/sprig/sprig /usr/local/bin/buzz-agent
+ln -sfn /opt/sprig/sprig /usr/local/bin/buzz-dev-mcp
+ln -sfn /opt/sprig/sprig /usr/local/bin/sprig
+rm -rf /tmp/sprig
 python3 -m venv /opt/buzz-listener/.venv
 /opt/buzz-listener/.venv/bin/pip install -q --upgrade pip
 /opt/buzz-listener/.venv/bin/pip install -q -r /opt/buzz-listener/requirements.txt
 systemctl daemon-reload
 systemctl enable --now buzz-keepalive.timer
-# Listener stays inactive until at least one /etc/buzz/*.env exists
-if ls /etc/buzz/*.env >/dev/null 2>&1; then
-  systemctl enable --now buzz-listener.service
-else
-  systemctl enable buzz-listener.service
-  echo "no agent env yet; start buzz-listener after add-agent.sh"
-fi
+systemctl enable --now buzz-litellm-proxy.service
+systemctl enable --now buzz-listener.service
+for envf in /etc/buzz/*.env; do
+  [ -f "$envf" ] || continue
+  slug=$(basename "$envf" .env)
+  case "$slug" in _*) continue ;; esac
+  systemctl enable --now "buzz-acp@${slug}.service" || true
+done
 '@
 $remotePath = Join-Path $env:TEMP "buzz-listener-install.sh"
 $unix = (($remote -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd() + "`n"
@@ -95,28 +121,89 @@ $unix = (($remote -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd() + "`n"
 Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $remotePath "${inst}:/tmp/install-listener.sh"
 Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo bash /tmp/install-listener.sh"
 
-$workerUrl = (& gcloud run services describe $C.GOOSE_SERVICE --project $Project --region $Region --format="value(status.url)").Trim()
-$internalIp = (& gcloud compute instances describe $inst --project $Project --zone $Zone --format="value(networkInterfaces[0].networkIP)").Trim()
-$gooseSa = "$($C.GOOSE_SA)@$Project.iam.gserviceaccount.com"
-$controlUrl = ""
-if ($internalIp) { $controlUrl = "http://${internalIp}:8743" }
-if ($workerUrl) {
-    $dropin = "[Service]`nEnvironment=GOOSE_WORKER_URL=$workerUrl`nEnvironment=GOOSE_WORKER_TIMEOUT=1620`nEnvironment=BUZZ_CONTROL_HOST=0.0.0.0`nEnvironment=BUZZ_CONTROL_PORT=8743`nEnvironment=GOOSE_WORKER_SA=$gooseSa`n"
-    if ($controlUrl) {
-        $dropin += "Environment=WORKER_APPLY_AUDIENCE=$controlUrl`nEnvironment=LISTENER_CONTROL_URL=$controlUrl`n"
-    }
-    $dropinPath = Join-Path $env:TEMP "buzz-listener-worker.conf"
-    [System.IO.File]::WriteAllText($dropinPath, ($dropin -replace "`r`n", "`n"))
-    Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo mkdir -p /etc/systemd/system/buzz-listener.service.d"
-    Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $dropinPath "${inst}:/tmp/buzz-listener-worker.conf"
-    Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo mv /tmp/buzz-listener-worker.conf /etc/systemd/system/buzz-listener.service.d/worker.conf && sudo systemctl daemon-reload && sudo systemctl restart buzz-listener.service || true"
-    Write-Host "listener GOOSE_WORKER_URL=$workerUrl"
+$litellmUrl = (& gcloud run services describe $C.LITELLM_SERVICE --project $Project --region $Region --format="value(status.url)" 2>$null).Trim()
+if (-not $litellmUrl) { throw "deploy LiteLLM first" }
+$master = (& gcloud secrets versions access latest --secret=litellm-master-key --project $Project 2>$null)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($master)) {
+    throw "litellm-master-key secret is missing"
 }
-if ($controlUrl) {
-    Write-Host "setting goose-worker LISTENER_CONTROL_URL=$controlUrl"
-    Invoke-Gcloud run services update $C.GOOSE_SERVICE --project $Project --region $Region `
-        --update-env-vars "LISTENER_CONTROL_URL=$controlUrl" --quiet
+$runtime = @(
+    "LITELLM_URL=$litellmUrl",
+    "LITELLM_AUDIENCE=$litellmUrl",
+    "LITELLM_MASTER_KEY=$master",
+    "OPENAI_COMPAT_API_KEY=$master",
+    "BUZZ_AGENT_PROVIDER=openai",
+    "OPENAI_COMPAT_BASE_URL=http://127.0.0.1:4000/v1",
+    "OPENAI_COMPAT_MODEL=goose",
+    "OPENAI_COMPAT_API=chat",
+    "BUZZ_AGENT_REQUIRE_REPLY=1",
+    "BUZZ_ACP_AGENT_COMMAND=buzz-agent",
+    "BUZZ_ACP_AGENT_ARGS=",
+    "BUZZ_ACP_MCP_COMMAND=buzz-dev-mcp",
+    "LISTENER_CONTROL_URL=http://127.0.0.1:8743",
+    "WORKER_APPLY_AUDIENCE=http://127.0.0.1:8743",
+    "APPLY_SA=$sa",
+    "BUZZ_WORKSPACE=/var/lib/buzz-listener",
+    "GOOGLE_CLOUD_PROJECT=$Project"
+)
+function Test-Secret([string]$Name) {
+    & gcloud secrets describe $Name --project $Project 1>$null 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+function Get-Secret([string]$Name) {
+    $v = & gcloud secrets versions access latest --secret=$Name --project $Project 2>$null
+    if ($LASTEXITCODE -ne 0) { return "" }
+    return [string]$v
+}
+if (Test-Secret "github-pat") {
+    $tok = Get-Secret "github-pat"
+    if ($tok) { $runtime += "GITHUB_PERSONAL_ACCESS_TOKEN=$tok" }
+}
+if (Test-Secret "tavily-api-key") {
+    $tok = Get-Secret "tavily-api-key"
+    if ($tok) { $runtime += "TAVILY_API_KEY=$tok" }
+}
+if (Test-Secret "stripe-api-key") {
+    $tok = Get-Secret "stripe-api-key"
+    if ($tok) { $runtime += "STRIPE_API_KEY=$tok" }
+}
+$runtimePath = Join-Path $env:TEMP "buzz-runtime.env"
+[System.IO.File]::WriteAllText($runtimePath, (($runtime -join "`n") + "`n"))
+Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $runtimePath "${inst}:/tmp/_runtime.env"
+$applyRuntime = @'
+set -euo pipefail
+install -m 600 /tmp/_runtime.env /etc/buzz/_runtime.env
+rm -f /tmp/_runtime.env
+systemctl daemon-reload
+systemctl restart buzz-litellm-proxy.service
+systemctl restart buzz-listener.service
+systemctl list-units --type=service --all 'buzz-acp@*' --no-legend | awk '{print $1}' | while read -r u; do
+  [ -n "$u" ] || continue
+  systemctl restart "$u" || true
+done
+'@
+$applyPath = Join-Path $env:TEMP "buzz-apply-runtime.sh"
+[System.IO.File]::WriteAllText($applyPath, (($applyRuntime -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd() + "`n")
+Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $applyPath "${inst}:/tmp/apply-runtime.sh"
+Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo bash /tmp/apply-runtime.sh"
+Remove-Item -Force $runtimePath, $applyPath -ErrorAction SilentlyContinue
+
+if (Test-Secret "gcloud-adc") {
+    $adcTmp = Join-Path $env:TEMP "buzz-adc.json"
+    & gcloud secrets versions access latest --secret=gcloud-adc --project $Project --out-file=$adcTmp 1>$null
+    if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $adcTmp)) {
+        Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $adcTmp "${inst}:/tmp/_adc.json"
+        Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo install -m 600 /tmp/_adc.json /etc/buzz/_adc.json && sudo rm -f /tmp/_adc.json && printf '\nGOOGLE_APPLICATION_CREDENTIALS=/etc/buzz/_adc.json\n' | sudo tee -a /etc/buzz/_runtime.env >/dev/null"
+        Remove-Item -Force $adcTmp -ErrorAction SilentlyContinue
+    }
+}
+
+& gcloud run services describe $C.GOOSE_SERVICE --project $Project --region $Region 1>$null 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "deleting retired Cloud Run $($C.GOOSE_SERVICE)"
+    & gcloud run services delete $C.GOOSE_SERVICE --project $Project --region $Region --quiet
 }
 
 $ip = (& gcloud compute instances describe $inst --project $Project --zone $Zone --format="value(networkInterfaces[0].accessConfigs[0].natIP)").Trim()
 Write-Host "listener VM ready ip=$ip (IPv4 billed ~`$3.65/mo). SSH: gcloud compute ssh $inst --zone $Zone --tunnel-through-iap"
+Write-Host "LiteLLM proxy -> $litellmUrl"

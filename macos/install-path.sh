@@ -158,7 +158,7 @@ else
   echo "Already on PATH: ${bin}"
   echo "Restart Buzz Desktop so it picks up ${wrapper}."
 fi
-echo "Provider id: cloud (default). New agents should Run on → cloud; stop any local Goose copy."
+echo "Provider id: cloud (default). New agents should Run on → cloud; stop any local agent copy."
 
 stop_leftovers() {
   launchctl bootout "gui/${uid}/${label}" >/dev/null 2>&1 || true

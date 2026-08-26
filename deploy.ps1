@@ -254,7 +254,7 @@ if (-not $NonInteractive) {
     if ($go -and $go.Trim() -match "^(n|no)$") { throw "Aborted." }
 }
 
-Write-Step "Deploying GCP stack (APIs, secrets, LiteLLM, Goose worker, listener)"
+Write-Step "Deploying GCP stack (APIs, secrets, LiteLLM, listener)"
 & (Join-Path $Infra "deploy-all.ps1")
 if ($LASTEXITCODE -ne 0) { throw "infra/deploy-all.ps1 failed ($LASTEXITCODE)" }
 
@@ -268,7 +268,7 @@ Write-Host ""
 Write-Host "Done. Cloud stack is in project $project."
 Write-Host "Next:"
 Write-Host "  1. Restart Buzz Desktop so Run on → cloud appears."
-Write-Host "  2. Stop any local Goose copies. Identity stays on this PC; Goose runs on Cloud Run."
+Write-Host "  2. Stop any local agent copies. Identity stays on this PC; buzz-acp + LiteLLM run on GCP."
 Write-Host "  3. Create or switch agents to Run on → cloud. BuzzCloudSync pushes nsecs to the listener over IAP."
 if ($SkipDesktop) {
     Write-Host "Desktop plugin was skipped. On the Buzz Desktop PC run: .\windows\install-path.ps1 (or ./macos/install-path.sh on a Mac)"

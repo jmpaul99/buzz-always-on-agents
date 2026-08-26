@@ -1,0 +1,95 @@
+{
+  "always_on": [
+    {
+      "slug": "buzz-dev-mcp",
+      "enabled": true,
+      "name": "buzz-dev-mcp",
+      "display_name": "Buzz CLI",
+      "command": "buzz-dev-mcp",
+      "args": [],
+      "env_keys": []
+    }
+  ],
+  "extras": [
+    {
+      "slug": "github",
+      "enabled": false,
+      "name": "GitHub",
+      "display_name": "GitHub",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.githubcopilot.com/mcp/"],
+      "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+    },
+    {
+      "slug": "stripe",
+      "enabled": false,
+      "name": "Stripe",
+      "display_name": "Stripe",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.stripe.com"],
+      "env_keys": ["STRIPE_API_KEY"]
+    },
+    {
+      "slug": "tavilywebsearch",
+      "enabled": false,
+      "name": "Tavily Web Search",
+      "display_name": "Tavily Web Search",
+      "command": "npx",
+      "args": ["-y", "tavily-mcp"],
+      "env_keys": ["TAVILY_API_KEY"]
+    },
+    {
+      "slug": "googleadc",
+      "enabled": false,
+      "name": "Google Workspace",
+      "display_name": "Google Workspace",
+      "command": "uv",
+      "args": [
+        "run",
+        "--with", "mcp>=2",
+        "--with", "google-api-python-client",
+        "--with", "google-auth",
+        "--with", "google-auth-httplib2",
+        "python",
+        "/opt/buzz/local-mcp/google_adc_mcp.py"
+      ],
+      "env_keys": ["GOOGLE_CLOUD_PROJECT"]
+    },
+    {
+      "slug": "containeruse",
+      "enabled": false,
+      "name": "Container Use",
+      "display_name": "Container Use",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://container-use.com/mcp"],
+      "env_keys": []
+    },
+    {
+      "slug": "linuxmcpserver",
+      "enabled": false,
+      "name": "Linux MCP Server",
+      "display_name": "Linux MCP Server",
+      "command": "uvx",
+      "args": ["linux-mcp-server"],
+      "env_keys": []
+    },
+    {
+      "slug": "repomix",
+      "enabled": false,
+      "name": "Repomix",
+      "display_name": "Repomix",
+      "command": "npx",
+      "args": ["-y", "repomix", "--mcp"],
+      "env_keys": []
+    },
+    {
+      "slug": "youtubetranscript",
+      "enabled": false,
+      "name": "YouTube Transcript",
+      "display_name": "YouTube Transcript",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/jkawamoto/mcp-youtube-transcript", "mcp-youtube-transcript"],
+      "env_keys": []
+    }
+  ]
+}

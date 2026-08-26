@@ -1,0 +1,19 @@
+[Unit]
+Description=buzz-acp agent %i
+After=network-online.target buzz-litellm-proxy.service
+Wants=network-online.target
+Requires=buzz-litellm-proxy.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/lib/buzz-listener
+EnvironmentFile=-/etc/buzz/_runtime.env
+EnvironmentFile=/etc/buzz/%i.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/buzz-listener/run-acp.sh %i
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

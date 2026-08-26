@@ -95,7 +95,7 @@ if ($userPath -notlike "*$bin*") {
     Write-Host "Already on PATH: $bin"
     Write-Host "Restart Buzz Desktop so it picks up buzz-backend-cloud.exe instead of the old .cmd shim."
 }
-Write-Host "Provider id: cloud (default). New agents should Run on → cloud; stop any local Goose copy."
+Write-Host "Provider id: cloud (default). New agents should Run on → cloud; stop any local agent copy."
 
 function Stop-BuzzCloudLeftovers {
     & schtasks.exe /End /TN "BuzzCloudSync" 2>$null | Out-Null

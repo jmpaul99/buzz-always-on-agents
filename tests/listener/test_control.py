@@ -1,7 +1,8 @@
-"""Control API auth: sidecar token vs goose-worker apply."""
+"""Control API auth: sidecar token vs local apply (Google ID token)."""
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -32,6 +33,7 @@ class ControlApiTest(unittest.TestCase):
         self._prev_checker = listener._worker_token_checker
         listener.AGENTS_DIR = self.agents
         listener._worker_token_checker = lambda token: token == WORKER
+        os.environ["BUZZ_SKIP_ACP_UNIT"] = "1"
         listener.ControlHandler.token = SYNC
         nsec, pubkey = generate_nsec()
         au.upsert_agent_files(

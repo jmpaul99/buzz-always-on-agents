@@ -1,9 +1,8 @@
-"""Forward Goose's localhost LiteLLM calls to Cloud Run with a Google ID token.
+"""Forward localhost LiteLLM calls to Cloud Run with a Google ID token.
 
-Goose's LiteLLM client is non-streaming: it POSTs and waits for one JSON body.
+buzz-agent POSTs a non-streaming chat completion and waits for one JSON body.
 Copying upstream hop-by-hop headers (chunked / keep-alive, no Content-Length)
-makes urllib wait for EOF that Cloud Run never sends, so Goose blocks after a
-tool call and never reaches `buzz messages send`. Always close-delimit a
+makes urllib wait for EOF that Cloud Run never sends. Always close-delimit a
 buffered JSON response.
 """
 from __future__ import annotations
@@ -17,7 +16,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("litellm-proxy")
@@ -67,93 +65,6 @@ def _disable_stream(body: bytes, content_type: str) -> bytes:
         return body
     payload["stream"] = False
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
-
-
-def _tool_spec_name(spec: Any) -> str:
-    if not isinstance(spec, dict):
-        return ""
-    fn = spec.get("function")
-    if isinstance(fn, dict) and fn.get("name"):
-        return str(fn["name"])
-    return str(spec.get("name") or "")
-
-
-def offered_tool_names(payload: dict[str, Any]) -> set[str]:
-    names: set[str] = set()
-    for spec in payload.get("tools") or []:
-        name = _tool_spec_name(spec)
-        if name:
-            names.add(name)
-    return names
-
-
-def unique_prefixed_name(offered: set[str], name: str) -> str | None:
-    """Map get_me → github__get_me when that suffix is unique among offered tools."""
-    if not name or name in offered:
-        return None
-    suffix = "__" + name
-    matches = [item for item in offered if item.endswith(suffix)]
-    if len(matches) != 1:
-        return None
-    return matches[0]
-
-
-def _rewrite_name_field(obj: Any, offered: set[str]) -> bool:
-    if not isinstance(obj, dict):
-        return False
-    current = obj.get("name")
-    if not isinstance(current, str):
-        return False
-    rewritten = unique_prefixed_name(offered, current)
-    if not rewritten:
-        return False
-    obj["name"] = rewritten
-    return True
-
-
-def rewrite_response_tool_names(payload: dict[str, Any], offered: set[str]) -> bool:
-    if not offered:
-        return False
-    changed = False
-    for choice in payload.get("choices") or []:
-        if not isinstance(choice, dict):
-            continue
-        msg = choice.get("message") or choice.get("delta")
-        if not isinstance(msg, dict):
-            continue
-        if _rewrite_name_field(msg.get("function_call"), offered):
-            changed = True
-        for call in msg.get("tool_calls") or []:
-            if not isinstance(call, dict):
-                continue
-            fn = call.get("function")
-            if isinstance(fn, dict):
-                if _rewrite_name_field(fn, offered):
-                    changed = True
-            elif _rewrite_name_field(call, offered):
-                changed = True
-        content = msg.get("content")
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict) and item.get("type") in {"tool_use", "tool_call"}:
-                    if _rewrite_name_field(item, offered):
-                        changed = True
-    return changed
-
-
-def apply_tool_name_rewrite(request_body: bytes, response_body: bytes, content_type: str) -> bytes:
-    if "json" not in (content_type or "").lower() or not response_body:
-        return response_body
-    try:
-        req = json.loads(request_body.decode("utf-8")) if request_body else {}
-        resp = json.loads(response_body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return response_body
-    if not isinstance(req, dict) or not isinstance(resp, dict):
-        return response_body
-    if not rewrite_response_tool_names(resp, offered_tool_names(req)):
-        return response_body
-    return json.dumps(resp, separators=(",", ":")).encode("utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -217,8 +128,6 @@ class Handler(BaseHTTPRequestHandler):
                 raw = resp.read()
                 status = resp.status
                 ctype = resp.headers.get("Content-Type", "application/json")
-            if self.command == "POST":
-                raw = apply_tool_name_rewrite(body, raw, ctype)
             self._reply(status, ctype, raw)
             log.info(
                 "proxy %s %s status=%s bytes=%s secs=%.1f",

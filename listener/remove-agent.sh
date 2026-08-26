@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Remove one agent env + instructions. Listener hot-reloads and drops the
-# WSS loop. Never echo nsecs.
+# Stop buzz-acp@<slug> and remove env + instructions. Never echo nsecs.
 # Usage: sudo /opt/buzz-listener/remove-agent.sh <slug>
 set -euo pipefail
 
@@ -14,5 +13,6 @@ if [[ ! "${NAME}" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; then
   exit 2
 fi
 
+systemctl disable --now "buzz-acp@${NAME}.service" >/dev/null 2>&1 || true
 rm -f "/etc/buzz/${NAME}.env" "/etc/buzz/${NAME}.instructions" "/etc/buzz/${NAME}.team"
 echo "removed ${NAME}"

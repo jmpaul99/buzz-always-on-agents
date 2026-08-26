@@ -1,6 +1,6 @@
 # macOS (Buzz Desktop)
 
-This Mac is the **Desktop GUI and identity replica**, not the agent runtime. Goose runs on Cloud Run. Chat-confirmed creates mint `nsec` on the listener; the sidecar imports the card. These scripts put a PATH plugin in Desktop and keep agent cards in sync with the GCP listener.
+This Mac is the **Desktop GUI and identity replica**, not the agent runtime. buzz-acp runs on the e2-micro; LiteLLM on Cloud Run. Chat-confirmed creates mint `nsec` on the listener; the sidecar imports the card. These scripts put a PATH plugin in Desktop and keep agent cards in sync with the GCP listener.
 
 Requires Python 3.10+ (`python3`, Homebrew or python.org — not the Xcode stub), `gcloud` on PATH, and Buzz Desktop.
 
@@ -13,7 +13,7 @@ chmod +x macos/*.sh
 ./macos/install-path.sh
 ```
 
-Then **restart Buzz Desktop**. New agents: **Run on → cloud**. If create still starts as This computer, switch immediately and stop the local Goose copy.
+Then **restart Buzz Desktop**. New agents: **Run on → cloud**. If create still starts as This computer, switch immediately and stop the local copy.
 
 If macOS asks to use the Keychain item for `buzz-desktop`, choose **Always Allow** so the sidecar can read nsecs without a prompt (LaunchAgents cannot show that dialog reliably). Running `./macos/sync-agent-instructions.sh` once from Terminal also primes access.
 
@@ -42,7 +42,7 @@ Desktop execs the discovered file in place; a shebang wrapper is enough — no n
 
 Config defaults: `BUZZ_GCP_PROJECT` / `BUZZ_GCP_ZONE` / `BUZZ_GCP_INSTANCE` / `BUZZ_RELAY_URL`. Sync URL `http://127.0.0.1:8743` (the sidecar’s tunnel). Token is read from `~/Library/Application Support/xyz.block.buzz.app/agents/cloud-sync-state.json` when the sidecar has already fetched it.
 
-Deploy still asks Desktop for a local harness; cloud Goose ignores it.
+Deploy still asks Desktop for a local harness; cloud buzz-acp ignores it.
 
 ## Sync sidecar (`buzz-cloud-sync.py`)
 
@@ -67,11 +67,11 @@ Logs: `~/Library/Application Support/xyz.block.buzz.app/agents/cloud-sync.log`. 
 
 | Syncs | Relay-native / not synced |
 | --- | --- |
-| Create / delete (this Desktop and other sidecars) | Memories, canvas, huddle, thread (relay; worker fetches via `buzz`) |
+| Create / delete (this Desktop and other sidecars) | Memories, canvas, huddle, thread (relay; buzz-acp fetches via `buzz`) |
 | `system_prompt`, team instruction text | Channel membership (Block relay) |
 | `respond_to`, allowlist, `channel_allowlist` | `is_active`, `runtime_pid`, start/stop timestamps |
 | `team_id`, display name, relay URL | Phone Buzz; GCS workspace (cloud agents only) |
-| Card overwritten to cloud Goose/LiteLLM (`model=goose`, `provider=litellm`) | Switching Run on → this computer is reverted next sidecar cycle |
+| Card overwritten to cloud LiteLLM (`model=goose`, `provider=litellm`) | Switching Run on → this computer is reverted next sidecar cycle |
 
 Deleting a Desktop card undeploys the GCP agent **and** removes the card on other Desktops. Stopping the card does **not**. Imported cards arrive as **Run on → cloud** and stopped.
 

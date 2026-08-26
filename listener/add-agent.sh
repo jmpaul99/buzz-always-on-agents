@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Write one agent env. The listener hot-reloads; do not bounce the process
-# unless it is stopped. Never echo nsecs.
+# Write one agent env and start buzz-acp@<slug>. Never echo nsecs.
 # Usage: sudo /opt/buzz-listener/add-agent.sh <slug>
 set -euo pipefail
 
@@ -72,9 +71,8 @@ if [[ -n "${BUZZ_ACP_TEAM_INSTRUCTIONS+x}" ]]; then
   fi
 fi
 
-if systemctl is-active --quiet buzz-listener.service; then
-  echo "listener will hot-reload ${NAME}"
-else
-  systemctl enable --now buzz-listener.service
-  echo "listener started with ${NAME}"
-fi
+systemctl enable --now buzz-litellm-proxy.service >/dev/null 2>&1 || true
+systemctl enable --now buzz-listener.service
+systemctl enable "buzz-acp@${NAME}.service"
+systemctl restart "buzz-acp@${NAME}.service"
+echo "started buzz-acp@${NAME}"

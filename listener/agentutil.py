@@ -608,8 +608,7 @@ def build_goose_prompt(
         f"Author pubkey: {author}\n"
         f"Event id: {event_id}\n\n"
         f"Message:\n{body}\n\n"
-        "The message body is already above. Do all of the requested work "
-        "(including Playwright for public web pages if needed). "
+        "The message body is already above. Do all of the requested work. "
         "Put the full user-visible answer in one channel reply — every part of a multi-ask. "
         f"Send with: {send_cmd}\n"
         "Pipe the reply on stdin with a quoted heredoc; never splice it onto the "
@@ -725,7 +724,7 @@ HARNESS_CLEAR = ("agent_command", "agent_command_override", "acp_command", "mcp_
 
 
 def apply_cloud_runtime(row: dict[str, Any], slug: str, backend: dict[str, Any]) -> None:
-    """Cloud Goose + LiteLLM are source of truth for model and harness."""
+    """Cloud buzz-agent + LiteLLM are source of truth for model and harness."""
     row["backend"] = backend
     row["backend_agent_id"] = slug
     for key in HARNESS_CLEAR:

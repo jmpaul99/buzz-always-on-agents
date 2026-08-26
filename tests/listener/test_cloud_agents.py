@@ -10,7 +10,7 @@ from email.message import EmailMessage
 from urllib.error import HTTPError
 
 _ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_ROOT / "goose-job"))
+sys.path.insert(0, str(_ROOT / "listener"))
 
 import cloud_agents as ca  # noqa: E402
 

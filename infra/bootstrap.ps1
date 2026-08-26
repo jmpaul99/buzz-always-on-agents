@@ -28,7 +28,7 @@ if (-not $repoExists) {
     Invoke-Gcloud artifacts repositories create $C.AR_REPO --repository-format=docker --location=$Region --project=$Project --quiet
 }
 
-foreach ($sa in @($C.LISTENER_SA, $C.GOOSE_SA, $C.LITELLM_SA)) {
+foreach ($sa in @($C.LISTENER_SA, $C.LITELLM_SA)) {
     $email = "${sa}@${Project}.iam.gserviceaccount.com"
     $exists = & gcloud iam service-accounts describe $email --project $Project 2>$null
     if ($LASTEXITCODE -ne 0) {
@@ -36,14 +36,13 @@ foreach ($sa in @($C.LISTENER_SA, $C.GOOSE_SA, $C.LITELLM_SA)) {
     }
 }
 
-$gooseEmail = "$($C.GOOSE_SA)@$Project.iam.gserviceaccount.com"
+$listenerEmail = "$($C.LISTENER_SA)@$Project.iam.gserviceaccount.com"
 $litellmEmail = "$($C.LITELLM_SA)@$Project.iam.gserviceaccount.com"
 $user = (& gcloud config get-value account).Trim()
 
-Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$gooseEmail" --role="roles/run.invoker" --quiet --condition=None
-Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$gooseEmail" --role="roles/compute.networkUser" --quiet --condition=None
+Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$listenerEmail" --role="roles/run.invoker" --quiet --condition=None
+Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$listenerEmail" --role="roles/secretmanager.secretAccessor" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$litellmEmail" --role="roles/secretmanager.secretAccessor" --quiet --condition=None
-Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$gooseEmail" --role="roles/secretmanager.secretAccessor" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="user:$user" --role="roles/iap.tunnelResourceAccessor" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="user:$user" --role="roles/compute.osLogin" --quiet --condition=None
 
@@ -59,15 +58,6 @@ if ($LASTEXITCODE -ne 0) {
         --allow=tcp:8743 --source-ranges=35.235.240.0/20 --target-tags=$($C.IAP_TAG) `
         --description="IAP TCP tunnel to listener control API"
 }
-$subnetCidr = (& gcloud compute networks subnets describe default --region $Region --project $Project --format="value(ipCidrRange)" 2>$null).Trim()
-if ($subnetCidr) {
-    & gcloud compute firewall-rules describe allow-goose-worker-8743 --project $Project 1>$null 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Invoke-Gcloud compute firewall-rules create allow-goose-worker-8743 --project $Project `
-            --allow=tcp:8743 --source-ranges=$subnetCidr --target-tags=$($C.IAP_TAG) `
-            --description="Cloud Run Direct VPC to listener control API"
-    }
-}
 & gcloud compute firewall-rules describe default-allow-ssh --project $Project 1>$null 2>$null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Disabling default-allow-ssh (0.0.0.0/22) if present"
@@ -79,14 +69,3 @@ if (-not $projectNumber) { throw "could not resolve project number for $Project"
 $cbSa = "${projectNumber}@cloudbuild.gserviceaccount.com"
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$cbSa" --role="roles/artifactregistry.writer" --quiet --condition=None
 Invoke-Gcloud projects add-iam-policy-binding $Project --member="serviceAccount:$cbSa" --role="roles/logging.logWriter" --quiet --condition=None
-
-$bucket = $C.WORKSPACE_BUCKET
-if ([string]::IsNullOrWhiteSpace($bucket)) {
-    $bucket = "buzz-goose-workspace-$Project"
-}
-Write-Host "workspace bucket=$bucket (~3 GB target; GCS has no hard quota)"
-& gcloud storage buckets describe "gs://$bucket" --project $Project 1>$null 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Invoke-Gcloud storage buckets create "gs://$bucket" --project $Project --location $Region --uniform-bucket-level-access
-}
-Invoke-Gcloud storage buckets add-iam-policy-binding "gs://$bucket" --member="serviceAccount:$gooseEmail" --role="roles/storage.objectAdmin" --project $Project --quiet

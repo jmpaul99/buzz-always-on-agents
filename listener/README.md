@@ -1,35 +1,19 @@
 # Listener
 
-Always-on WSS client on the GCP `e2-micro`. One outbound socket per `/etc/buzz/*.env` agent. On a matching mention or DM it posts to the Goose Cloud Run service.
+Thin control API on the GCP `e2-micro` plus one systemd `buzz-acp@<slug>` per `/etc/buzz/*.env` agent. Mentions are handled by **stock buzz-acp** (native standing prompt, ACP Activity). This process only serves Desktop roster/nsec sync on `:8743`.
 
-Installed to `/opt/buzz-listener` by [`infra/deploy-listener.ps1`](../infra/deploy-listener.ps1). systemd unit: `buzz-listener.service`.
+Installed to `/opt/buzz-listener` by [`infra/deploy-listener.ps1`](../infra/deploy-listener.ps1).
 
-## What it does
+## Layout on the VM
 
-1. Loads every `*.env` in `BUZZ_AGENTS_DIR` (default `/etc/buzz`) except names starting with `_`.
-2. Supervises one `agent_loop` per pubkey. Changing an env file changes its fingerprint; the supervisor cancels and restarts that loop within ~1s. No process bounce.
-3. After NIP-42 AUTH, HTTP-queries membership (kind 39002) and channel metadata (kind 39000), then `REQ`s each live channel.
-4. Stream/private channels filter `#p` to the agent pubkey (mentions). DMs and forums subscribe without `#p`. Forums also `REQ` kinds `45001` / `45002` / `45003`.
-5. Live join/leave: kinds 44100 / 44101 / 39002 add or CLOSE channel subs without reconnecting.
-6. Matching events get 👀 + 💬 reactions and a typing heartbeat (kind 20002, every 3s). Heartbeats and owner control commands do not.
-7. `POST {GOOSE_WORKER_URL}/run` with a metadata-server identity token. One in-flight worker call per agent (`threading.Lock`). Owner `!cancel` / `!rotate` `POST` `/cancel` (does not take that lock) and kill the Goose process. `!shutdown` is a no-op.
-8. When the agent’s own chat event arrives (or the worker returns), reactions are deleted (kind 5) and typing stops.
-9. Idle heartbeat (`BUZZ_ACP_HEARTBEAT_INTERVAL`, default `0` / off) `POST`s `/run` with a feed prompt when that agent is idle. At most one heartbeat in flight across agents. Set to ≥10s to enable.
+| Unit | Role |
+| --- | --- |
+| `buzz-listener.service` | Control API (`0.0.0.0:8743`) |
+| `buzz-litellm-proxy.service` | Localhost IAM proxy to Cloud Run LiteLLM (`127.0.0.1:4000`) |
+| `buzz-acp@<slug>.service` | One WSS + ACP client per agent; child is `buzz-agent` (sprig) |
+| `buzz-keepalive.timer` | Daily idle-reclaim bump for the free e2-micro |
 
-Dedup is `/var/lib/buzz-listener/seen.json` (last 4000 `{agent_pubkey}:{event_id}` keys). The same mention can still wake every agent who was `#p`-tagged. Presence kind 20001 (`online`) is published after AUTH.
-
-## Mention rules (`agentutil.should_handle`)
-
-Handled kinds: `9`, `46010`, `40007`, plus `45001` / `45002` / `45003` on forum channels.
-
-Skipped when:
-
-- the author is the agent itself
-- the owner sent `!shutdown`, `!cancel`, or `!rotate` while mentioning the agent (or in a DM) — those are consumed by the harness, not Goose
-- `respond_to` is `owner-only` / `owner` and the author is not the `auth` tag owner
-- `respond_to` is `allowlist` and the author is not on `BUZZ_ACP_RESPOND_TO_ALLOWLIST`
-- `BUZZ_CHANNEL_ALLOWLIST` is set and the event’s channel is not on it
-- the channel is a stream/private channel and the agent is not `#p`-mentioned (DMs and forums do not require a mention)
+Sprig multicall links (`buzz`, `buzz-acp`, `buzz-agent`, `buzz-dev-mcp`) live in `/opt/sprig` and `/usr/local/bin`. `buzz-cloud-agents` is `/opt/buzz-listener/cloud_agents.py`.
 
 ## Agent files
 
@@ -44,48 +28,52 @@ Written by the control API, `add-agent.sh`, or Desktop sync. Mode `700` on `/etc
 | `BUZZ_AUTH_TAG` | Raw JSON tags; owner pubkey is the `auth` tag |
 | `BUZZ_ACP_DISPLAY_NAME` | Display name |
 | `BUZZ_PUBKEY` | Declared hex pubkey (mismatch → key-derived pubkey wins) |
-| `BUZZ_ACP_RESPOND_TO` | `owner-only` (default), `allowlist`, or anything else = everyone |
+| `BUZZ_ACP_RESPOND_TO` | `owner-only` (default), `allowlist`, or `anyone` |
 | `BUZZ_ACP_RESPOND_TO_ALLOWLIST` | Comma-separated pubkeys |
 | `BUZZ_TEAM_ID` | Desktop team id |
 | `BUZZ_UPDATED_AT` | RFC3339; last-write-wins with Desktop |
 | `BUZZ_CHANNEL_ALLOWLIST` | Optional comma-separated channel ids |
 
-`/etc/buzz/<slug>.instructions` is the system prompt (max 8000 chars when loaded).
-
-`/etc/buzz/<slug>.team` is denormalized team instruction text (max 8000). Deleted when instructions are empty so a cleared team does not leave stale text.
+`/etc/buzz/<slug>.instructions` is the system prompt (max 8000 chars when loaded). Concatenated with `.team` into `BUZZ_AGENT_SYSTEM_PROMPT_FILE` when `buzz-acp@` starts. Core / huddle / canvas / thread-or-DM standing context is **inside buzz-acp**, not cloned here.
 
 Slug: `[a-z0-9][a-z0-9-]{0,31}`. If the display-name slug is already another pubkey, the API suffixes `-{pubkey[:8]}`.
 
+Shared runtime (`/etc/buzz/_runtime.env`, not an agent): LiteLLM URL + master key, `OPENAI_COMPAT_*`, `APPLY_SA`, `LISTENER_CONTROL_URL=http://127.0.0.1:8743`.
+
 ## Control API (`0.0.0.0:8743`)
 
-Firewall: IAP range `35.235.240.0/20` (`allow-iap-8743`) plus the default subnet (`allow-goose-worker-8743`) so Cloud Run Direct VPC can apply chat-confirmed creates/updates. Sidecar token: `/etc/buzz/_sync.token` (`Authorization: Bearer …` or `X-Buzz-Sync-Token`). Goose worker: Google ID token from `GOOSE_WORKER_SA` with audience `WORKER_APPLY_AUDIENCE` / `LISTENER_CONTROL_URL`. Unauthenticated `/health` and `/healthz` return `{"ok":true}`.
+Firewall: IAP range `35.235.240.0/20` (`allow-iap-8743`). Sidecar token: `/etc/buzz/_sync.token` (`Authorization: Bearer …` or `X-Buzz-Sync-Token`). Chat apply (`buzz-cloud-agents` on this VM): Google ID token from `APPLY_SA` (listener SA) with audience `WORKER_APPLY_AUDIENCE` / `LISTENER_CONTROL_URL`. Unauthenticated `/health` and `/healthz` return `{"ok":true}`.
 
 | Method | Path | Body / result |
 | --- | --- | --- |
 | `GET` | `/health`, `/healthz` | `{"ok":true}` (no auth) |
-| `GET` | `/agents` | Roster for Desktop sync: slug, pubkey, display, prompt, permissions, `owner`, `updated_at`, `nsec`, `auth_tag`, `team_instructions`. **Sidecar token only** (never the Goose ID token). Never log the body. Sidecars import only agents this Desktop user can access. |
-| `GET` | `/agents/index` | Worker-only names: `{pubkey, slug, name}` (no nsec). Used by `buzz-cloud-agents list`; updates pass that `pubkey`. |
-| `POST` | `/agents` | Worker apply create. Mints nsec, owner-only, `auth_tag` owner = confirming human. Goose ID token. Body: `author_pubkey`, `actor_slug` or `actor_pubkey`, `name`, `system_prompt`. Returns `{ok, agent_id, pubkey}` (no nsec). |
-| `PUT` | `/agents/{pubkey}` | Sidecar upsert **or** worker apply update. Sidecar: `nsec` required on create; omitted on update keeps the existing key. Worker: owner-gated; cannot set `nsec`; forces `updated_at` now. |
-| `DELETE` | `/agents/{pubkey}` | Sidecar token. Removes `.env`, `.instructions`, and `.team`. Idempotent. |
+| `GET` | `/agents` | Roster for Desktop sync: slug, pubkey, display, prompt, permissions, `owner`, `updated_at`, `nsec`, `auth_tag`, `team_instructions`. **Sidecar token only**. Never log the body. |
+| `GET` | `/agents/index` | Apply-only names: `{pubkey, slug, name}` (no nsec). |
+| `POST` | `/agents` | Chat apply create. Mints nsec, owner-only. Apply ID token. Body: `author_pubkey`, `actor_slug` or `actor_pubkey`, `name`, `system_prompt`. Returns `{ok, agent_id, pubkey}` (no nsec). |
+| `PUT` | `/agents/{pubkey}` | Sidecar upsert **or** apply update. Sidecar: `nsec` required on create; omitted on update keeps the existing key. Apply: owner-gated; cannot set `nsec`. PUT/DELETE start or stop `buzz-acp@<slug>`. |
+| `DELETE` | `/agents/{pubkey}` | Sidecar token. Removes `.env`, `.instructions`, `.team`, and disables the unit. Idempotent. |
 
 Sidecar PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_prompt`, `respond_to`, `respond_to_allowlist`, `team_id`, `team_instructions`, `auth_tag`, `relay_url` / `relay`, `updated_at`, `channel_allowlist`. Payload cap 512 KiB.
 
-Worker apply is owner-only: the mention author must own the actor agent (and the target on update). New chat-created agents default to `respond_to=owner-only`.
+## MCP catalog
 
-Hot-reload watches the env files; PUT/DELETE do not restart systemd. Redeploy the listener for Desktop roster import (`nsec` on GET `/agents`).
+[`mcp-catalog.json`](mcp-catalog.json) is not in Buzz Desktop.
 
-## Worker enqueue
+**Always-on:** `buzz-dev-mcp` (shell / files / `buzz` CLI) via `BUZZ_ACP_MCP_COMMAND`.
 
-Requires `GOOSE_WORKER_URL` (set by deploy as a systemd drop-in). Timeout default 1620s (`GOOSE_WORKER_TIMEOUT`). Retries 429/502/503 and transport errors up to 3 times.
+**Dropped:** `playwright`, `chromedevtools`, `goosedocs`. No Chromium on the micro.
 
-Recipe: `taskmcp.match_task_recipe` against `task-mcps.json`. A recipe is sent only when **exactly one** catalog slug’s keywords appear in the mention. Ambiguous or no hit → generic Goose prompt (Extension Manager can still enable MCPs).
+**Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled**. Do not enable all eight on an e2-micro. HTTP GitHub/Stripe use `npx mcp-remote`. Keyword-per-mention recipes are gone; extras are session-scoped if you turn them on later.
 
-The prompt and `BUZZ_SEND_CMD` tell Goose to `buzz messages send --channel … --content -` (and `--reply-to` when the mention has an `e` tag). Feed the reply on stdin with a quoted heredoc; never splice it onto the argv, never replace spaces with underscores, and never send `...` or an empty message. Recipe `identity` also gets `agentutil.with_turn_hint` so a multi-mention still replies as this agent (do not wait, do not speak for others). Prompt cap 20 000 chars; message body 8 000. `BUZZ_TEAM_INSTRUCTIONS` is passed from `/etc/buzz/<slug>.team` when present.
+## LiteLLM
+
+`buzz-agent` uses `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_*` against `http://127.0.0.1:4000/v1` (`model=goose`, `OPENAI_COMPAT_API=chat`). The proxy mints a GCE identity token and forwards a buffered JSON body (`Content-Length`). `buzz-agent` hardcodes `stream: false`; ACP `session/update` still streams to Desktop Agent Activity per tool round.
+
+`BUZZ_AGENT_REQUIRE_REPLY=1` so the model posts with `buzz messages send` instead of ending silent.
 
 ## systemd
 
-`buzz-listener.service` runs as root, `Restart=always`. It stays enabled-but-inactive until at least one `*.env` exists; `add-agent.sh` starts it.
+`buzz-listener.service` always runs (Desktop sync needs `:8743` even with zero agents). `add-agent.sh` writes the env and `systemctl enable --now buzz-acp@<slug>`. `remove-agent.sh` disables the unit then deletes files.
 
 `buzz-keepalive.timer` (daily, 1h jitter) runs `keepalive.sh`: 32 MiB `/dev/urandom` → `/dev/null` plus a GET to google.com, so the free e2-micro is not idle-reclaimed.
 
@@ -103,12 +91,13 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 
 | File | Role |
 | --- | --- |
-| `listener.py` | WSS loops, reactions/typing, worker POST, control API |
-| `seen.py` | Per-agent mention dedup (`seen.json`) |
-| `agentutil.py` | Env records, permissions, membership, Goose prompt, `with_turn_hint`, Desktop merge helpers |
-| `nostrutil.py` | nsec decode, schnorr sign, NIP-42 AUTH, NIP-98 HTTP auth |
-| `taskmcp.py` | Parse `goose/config.yaml` extensions, keyword catalog, recipe match |
-| `task-mcps.json` | Committed keyword catalog. Regenerate with `python goose/generate_recipes.py goose/config.yaml <recipes-dir> listener/task-mcps.json` when adding an MCP, then redeploy the listener. |
+| `listener.py` | Control API; starts/stops `buzz-acp@` on PUT/DELETE |
+| `run-acp.sh` | Env mapping then `exec buzz-acp` |
+| `litellm_proxy.py` | Localhost IAM proxy to Cloud Run LiteLLM |
+| `cloud_agents.py` | Chat confirm create/update (`buzz-cloud-agents`) |
+| `agentutil.py` | Env records, permissions, Desktop merge helpers |
+| `nostrutil.py` | nsec decode, schnorr sign |
+| `mcp_catalog.py` / `mcp-catalog.json` | Always-on + disabled extras |
 
 `agentutil.py` is also copied next to the Windows and macOS sync sidecars so Desktop and the VM share slug/allowlist/roster merge rules.
 
@@ -117,14 +106,12 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BUZZ_AGENTS_DIR` | `/etc/buzz` | Agent env + instructions |
-| `BUZZ_STATE_DIR` | `/var/lib/buzz-listener` | `seen.json` |
+| `BUZZ_STATE_DIR` | `/var/lib/buzz-listener` | Workspace + generated prompts |
 | `BUZZ_RELAY_URL` | from env files | Fallback relay |
-| `GOOSE_WORKER_URL` | empty (required) | Cloud Run `goose-worker` URL |
-| `GOOSE_WORKER_TIMEOUT` | `1620` | urllib timeout for `/run` |
-| `BUZZ_ACP_HEARTBEAT_INTERVAL` | `0` | Seconds between idle feed prompts. `0` disables (default, so Cloud Run can scale to zero). Values 1–9 disable. ≥10 enables. |
-| `BUZZ_ACP_HEARTBEAT_PROMPT` | (built-in feed prompt) | Override heartbeat prompt text |
 | `BUZZ_CONTROL_HOST` | `0.0.0.0` | Control API bind |
 | `BUZZ_CONTROL_PORT` | `8743` | Control API port |
+| `APPLY_SA` | listener SA email | Google ID token email for chat apply |
+| `LISTENER_CONTROL_URL` | `http://127.0.0.1:8743` | Apply audience + `buzz-cloud-agents` |
 
 ## Tests
 
@@ -134,4 +121,4 @@ From the repo root:
 python -m unittest discover -s tests/listener
 ```
 
-No GCP. `test_agentutil.py` covers mention filters, reactions, membership, Desktop compact/merge, and multi-Desktop roster import/delete. `test_seen.py` covers per-agent mention dedup (one event must still wake every mentioned agent). `test_taskmcp.py` covers config parse, recipe generation, and keyword routing.
+No GCP. `test_agentutil.py` covers mention filters (used by native buzz-acp env), Desktop compact/merge, and multi-Desktop roster import/delete. `test_control.py` covers sidecar vs apply tokens. `test_mcp_catalog.py` asserts no browser slugs and disabled extras.

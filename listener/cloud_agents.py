@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Propose/apply cloud agent create or instruction update after chat confirm.
 
-Goose must not curl the listener. Pending JSON keeps turn-2 apply identical to
-the proposed text. Never prints nsecs.
+Pending JSON keeps turn-2 apply identical to the proposed text. Never prints nsecs.
 """
 from __future__ import annotations
 
@@ -26,8 +25,10 @@ def _env(env: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def workspace_root(env: dict[str, str]) -> pathlib.Path:
-    raw = (env.get("BUZZ_WORKSPACE") or os.environ.get("BUZZ_WORKSPACE") or "/mnt/buzz").strip()
-    return pathlib.Path(raw or "/mnt/buzz")
+    raw = (
+        env.get("BUZZ_WORKSPACE") or os.environ.get("BUZZ_WORKSPACE") or "/var/lib/buzz-listener"
+    ).strip()
+    return pathlib.Path(raw or "/var/lib/buzz-listener")
 
 
 def pending_path(env: dict[str, str]) -> pathlib.Path:

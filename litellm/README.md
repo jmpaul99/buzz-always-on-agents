@@ -1,12 +1,12 @@
 # LiteLLM router
 
-Cloud Run service `litellm-goose`. Goose never talks to providers directly: the worker sidecar (`goose-job/litellm_proxy.py`) forwards `127.0.0.1:4000` here with IAM + `LITELLM_MASTER_KEY`.
+Cloud Run service `litellm-goose`. `buzz-agent` never talks to providers directly: the GCE sidecar (`listener/litellm_proxy.py`) forwards `127.0.0.1:4000` here with IAM + `LITELLM_MASTER_KEY`.
 
 Image: `ghcr.io/berriai/litellm:main-stable` plus this repo’s `config.yaml` after keyword merge. Built by [`infra/cloudbuild-litellm.yaml`](../infra/cloudbuild-litellm.yaml).
 
 ## Virtual model `goose`
 
-Goose is configured with `GOOSE_PROVIDER=litellm` and `GOOSE_MODEL=goose`. That alias is LiteLLM’s complexity auto-router (`auto_router/complexity_router`). The LLM classifier is **off**; routing is heuristic + keyword rules.
+`buzz-agent` is configured with `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_MODEL=goose`. That alias is LiteLLM’s complexity auto-router (`auto_router/complexity_router`). The LLM classifier is **off**; routing is heuristic + keyword rules.
 
 | Tier | Models (order = preference / shuffle pool) |
 | --- | --- |
@@ -23,7 +23,7 @@ Keyword shortcuts:
 
 Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed asks like “write a poem and react” stay MEDIUM. Token threshold `complex: 400`. Adaptive routing + session affinity (1h) are on. Default model: `groq-qwen` (`qwen3.6-27b`) so greetings still emit `buzz messages send`. SIMPLE stays on Groq/Gemini so it does not burn the shared NIM ~40 RPM wallet. `gemini-lite`, `groq-20b`, `openrouter-free`, and `openrouter-cheap` stay in `model_list` for manual curls but are **not** on the Goose fallback chain — they skip tool calls too often.
 
-`custom_technical_keywords` starts with Buzz/infra terms (`buzz`, `nostr`, `nsec`, `relay`, …). **Disabled Goose extension names are appended at image build** by `merge_extension_keywords.py` so adding an MCP in `goose/config.yaml` automatically steers those mentions toward COMPLEX without a hand-maintained list.
+`custom_technical_keywords` starts with Buzz/infra terms (`buzz`, `nostr`, `nsec`, `relay`, …). **Disabled MCP catalog extras are appended at image build** by `merge_extension_keywords.py` so adding an extra in `listener/mcp-catalog.json` automatically steers those mentions toward COMPLEX without a hand-maintained list.
 
 ## Fallback chain
 
@@ -47,21 +47,21 @@ Empty process-env values are skipped by `infra/create-secrets.ps1` so you never 
 
 ## Deploy
 
-[`infra/deploy-litellm.ps1`](../infra/deploy-litellm.ps1): 1 vCPU / 2 Gi, min 0, max 3, timeout 300s, concurrency 8, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`. Invoker: Goose job SA (`goose-job@…`).
+[`infra/deploy-litellm.ps1`](../infra/deploy-litellm.ps1): 1 vCPU / 2 Gi, min 0, max 3, timeout 300s, concurrency 8, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`. Invoker: listener SA (`buzz-listener@…`).
 
-Goose worker must be able to mint an identity token whose audience is this service URL (`LITELLM_URL` / `LITELLM_AUDIENCE`).
+The GCE proxy mints an identity token whose audience is this service URL (`LITELLM_URL` / `LITELLM_AUDIENCE`).
 
 ## Build-time keyword merge
 
 Dockerfile:
 
 ```
-COPY goose/config.yaml
+COPY listener/mcp-catalog.json
 COPY litellm/config.yaml
-RUN python merge_extension_keywords.py goose-config litellm-config /app/config.yaml
+RUN python merge_extension_keywords.py catalog litellm-config /app/config.yaml
 ```
 
-`disabled_extension_keywords` walks `extensions:` and, for each `enabled: false` slug, adds the slug, `name`, `display_name`, and ≥3-char tokens. Those are merged into `custom_technical_keywords`.
+`catalog_keywords` walks `extras` and, for each `enabled: false` slug, adds the slug, `name`, `display_name`, and ≥3-char tokens. Those are merged into `custom_technical_keywords`.
 
 From the repo root:
 
@@ -80,4 +80,4 @@ curl http://127.0.0.1:8080/v1/chat/completions ^
   -d "{\"model\":\"goose\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
 ```
 
-Timeout for completions is 240s (`router_settings.timeout` and Goose `LITELLM_TIMEOUT`).
+Timeout for completions is 240s (`router_settings.timeout`). `buzz-agent` uses `BUZZ_AGENT_LLM_TIMEOUT_SECS` (default 240).

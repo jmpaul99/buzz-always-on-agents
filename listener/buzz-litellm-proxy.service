@@ -1,0 +1,17 @@
+[Unit]
+Description=Localhost IAM proxy to Cloud Run LiteLLM
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/buzz-listener
+EnvironmentFile=-/etc/buzz/_runtime.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/buzz-listener/.venv/bin/python /opt/buzz-listener/litellm_proxy.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
