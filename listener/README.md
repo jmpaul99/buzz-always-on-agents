@@ -118,9 +118,10 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 
 ## Tests
 
+From the repo root:
+
 ```powershell
-cd listener
-python -m unittest test_agentutil.py test_taskmcp.py
+python -m unittest discover -s tests/listener
 ```
 
 No GCP. `test_agentutil.py` covers mention filters, reactions, membership, Desktop compact/merge, and multi-Desktop roster import/delete. `test_taskmcp.py` covers config parse, recipe generation, and keyword routing.

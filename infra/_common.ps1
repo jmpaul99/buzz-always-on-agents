@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 $ErrorActionPreference = "Continue"
-$Root = Split-Path -Parent $PSScriptRoot
+$script:Root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "_env.ps1")
 Import-DotEnvToProcess (Join-Path $Root ".env")
 $cfgPath = Join-Path $PSScriptRoot "config.env"

@@ -34,6 +34,7 @@ SKIP_COMMAND_RE = re.compile(
 )
 ACCEPTED_RE = re.compile(r'"accepted"\s*:\s*true', re.I)
 MAX_THOUGHT = 400
+MAX_REPLY = 8000
 MAX_RESULT = 240
 STREAM_TYPES = {"message", "notification", "error", "complete"}
 JSON_BUF_MAX = 200_000
@@ -198,6 +199,7 @@ class GooseActivityParser:
         self._seen_tool = False
         self.last_tool = ""
         self.last_command = ""
+        self.last_reply = ""
         self.json_events = 0
         self.stdout_bytes = 0
 
@@ -291,6 +293,7 @@ class GooseActivityParser:
         self.json_events += 1
         kind = obj.get("type")
         if kind == "complete":
+            self._complete_event(obj)
             return
         if kind == "notification":
             blob = "\n".join(_texts(obj))
@@ -358,10 +361,48 @@ class GooseActivityParser:
         if isinstance(text, str) and text.strip() and kind not in {"image", "redactedthinking"}:
             self._assistant_text(text, thinking=False)
 
+    def _complete_event(self, obj: dict[str, Any]) -> None:
+        msg = obj.get("message")
+        if isinstance(msg, dict):
+            role = str(msg.get("role") or "").lower()
+            content = msg.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        self._stream_content(item, tools_only=role in {"user", "system"})
+            elif isinstance(content, str) and content.strip() and role not in {"user", "system"}:
+                self._assistant_text(content, thinking=False)
+            return
+        if isinstance(msg, str) and msg.strip():
+            self._assistant_text(msg, thinking=False)
+            return
+        blob = "\n".join(_texts(obj)).strip()
+        if blob:
+            self._assistant_text(blob, thinking=False)
+
+    def _store_reply(self, text: str) -> None:
+        cleaned = redact(text).strip()
+        if not cleaned or _is_banner(cleaned):
+            return
+        self.last_reply = cleaned[:MAX_REPLY]
+
+    def record_external_send(self, command: str, output: str, *, ok: bool) -> None:
+        args = {"command": command[:500]}
+        self._begin_tool("shell", args=args)
+        tool = self._open.get(self._tui_id) or (next(iter(self._open.values())) if self._open else None)
+        if tool is not None and output.strip():
+            tool.out.append(output)
+        if tool is not None:
+            self._finish_tool(tool.tool_id, ok)
+        if ok:
+            self._mark_replied()
+
     def _assistant_text(self, text: str, thinking: bool) -> None:
         # Buzz already shows the channel reply. Goose prints that same
         # assistant text after the shell send, so emitting it as Thinking
         # puts a duplicate bubble after the tool row.
+        if not thinking:
+            self._store_reply(text)
         if not thinking and (self.replied or self._seen_tool):
             return
         self._thought(text)
@@ -498,6 +539,8 @@ class GooseActivityParser:
         self._prose = []
         if not text:
             return
+        if not self.last_reply:
+            self._store_reply(text)
         if len(text) > MAX_THOUGHT:
             text = text[:MAX_THOUGHT].rstrip() + "…"
         self._emit_update(

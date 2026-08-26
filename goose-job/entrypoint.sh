@@ -34,6 +34,9 @@ fi
 
 export GOOSE_DISABLE_SESSION_NAMING=true
 export GOOSE_RECIPE_PATH="${GOOSE_RECIPE_PATH:-/home/goose/recipes}"
+export GOOSE_MAX_TURNS="${GOOSE_MAX_TURNS:-25}"
+export GOOSE_CLI_SHOW_THINKING="${GOOSE_CLI_SHOW_THINKING:-1}"
+export GOOSE_THINKING_EFFORT="${GOOSE_THINKING_EFFORT:-low}"
 if [[ -z "${GOOSE_MOIM_MESSAGE_FILE:-}" && -f "${HOME}/.config/goose/guardrails.md" ]]; then
   export GOOSE_MOIM_MESSAGE_FILE="${HOME}/.config/goose/guardrails.md"
 fi

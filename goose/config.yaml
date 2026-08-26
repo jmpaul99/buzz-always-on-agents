@@ -312,7 +312,7 @@ providers:
     model: goose
     configured: true
 GOOSE_TELEMETRY_ENABLED: false
-GOOSE_THINKING_EFFORT: off
+GOOSE_THINKING_EFFORT: low
 GOOSE_MODE: auto
 # Cloud has no approval UI; this flag would park shell tools (including send) forever.
 SECURITY_PROMPT_ENABLED: false

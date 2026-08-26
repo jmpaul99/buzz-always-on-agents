@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import sys
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "goose-job"))
 
 from activity import GooseActivityParser
 
@@ -312,6 +316,76 @@ class GooseActivityParserTest(unittest.TestCase):
         self.assertFalse(replied)
         calls = tools(events)
         self.assertTrue(calls)
+
+    def test_complete_event_keeps_assistant_text(self):
+        events, replied = collect(
+            json.dumps(
+                {
+                    "type": "complete",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "All systems go."}],
+                    },
+                }
+            )
+            + "\n"
+        )
+        thoughts = [
+            e.get("content", {}).get("text")
+            for e in events
+            if isinstance(e, dict) and e.get("sessionUpdate") == "agent_thought_chunk"
+        ]
+        self.assertEqual(thoughts, ["All systems go."])
+        self.assertFalse(replied)
+
+    def test_last_reply_survives_skipped_post_tool_text(self):
+        req = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "toolRequest",
+                        "id": "t-date",
+                        "toolCall": {
+                            "status": "success",
+                            "value": {
+                                "name": "developer__shell",
+                                "arguments": {"command": "date"},
+                            },
+                        },
+                    }
+                ],
+            },
+        }
+        reply = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Ready on the channel."}],
+            },
+        }
+        events = []
+        parser = GooseActivityParser(lambda _k, data: events.append(data))
+        parser.feed(json.dumps(req) + "\n" + json.dumps(reply) + "\n")
+        parser.close()
+        self.assertEqual(parser.last_reply, "Ready on the channel.")
+        self.assertFalse(parser.replied)
+
+    def test_record_external_send_marks_replied(self):
+        events = []
+        replied = []
+        parser = GooseActivityParser(
+            lambda _k, data: events.append(data),
+            on_reply=lambda: replied.append(1),
+        )
+        parser.record_external_send(
+            "buzz messages send --channel x --content '...'",
+            '{"accepted":true,"id":"e1"}',
+            ok=True,
+        )
+        self.assertTrue(replied)
+        self.assertTrue(parser.replied)
 
     def test_messages_send_still_marks_replied(self):
         _events, replied = collect(

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "litellm"))
+
 from merge_extension_keywords import disabled_extension_keywords, merge_keyword_block
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class MergeExtensionKeywordsTest(unittest.TestCase):

@@ -109,7 +109,7 @@ gcloud compute ssh buzz-listener --zone us-central1-a --tunnel-through-iap
 
 ## Cloud Build YAMLs
 
-Context is the **repo root** so Dockerfiles can `COPY goose/…`, `COPY listener/…`. `.dockerignore` excludes `windows/`, `macos/`, `.git`, env files. Goose build timeout 1800s.
+Context is the **repo root** so Dockerfiles can `COPY goose/…`, `COPY listener/…`. `.dockerignore` excludes `windows/`, `macos/`, `tests/`, `.git`, env files. Goose build timeout 1800s.
 
 ## Typical partial redeploys
 

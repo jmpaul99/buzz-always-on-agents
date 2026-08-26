@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "listener"))
 
 import agentutil as au
 
@@ -437,6 +440,7 @@ class GoosePromptTests(unittest.TestCase):
         self.assertIn("buzz reactions", low)
         self.assertIn("event id", low)
         self.assertIn("every part of a multi-ask", low)
+        self.assertIn("text-only answer is not delivered", low)
         self.assertNotIn("after a successful send, stop", low)
 
 

@@ -38,7 +38,7 @@ Do not open `0.0.0.0/0:22`. The listener control API binds `0.0.0.0:8743`, but t
 2. Public/stream channels require a `#p` mention of the agent. DMs do not.
 3. Listener posts 👀 then 💬 reactions and a typing heartbeat (kind 20002 every 3s).
 4. It POSTs `{agent_name, prompt, recipe, env}` to `GOOSE_WORKER_URL/run` with a Google identity token. One in-flight turn per agent on the listener.
-5. Worker isolates Goose under `/tmp/goose-<agent>` (`HOME`), optionally loads a task-MCP recipe, and streams observer events (kind 24200) so Desktop Agent Activity can show thoughts/tools.
+5. Worker isolates Goose under `/tmp/goose-<agent>` (`HOME`), runs the `reply` recipe (or a task-MCP recipe), and streams observer events (kind 24200) so Desktop Agent Activity can show thoughts/tools.
 6. Goose replies with `buzz messages send`. Listener sees the agent's own chat event, retracts the reactions, and stops typing.
 
 Schedules are ordinary Buzz YAML `on: schedule` posts that `@` an agent. The listener treats them like any other mention.
@@ -82,6 +82,7 @@ Open agent cards may not redraw until you reopen them (or restart Desktop); the 
 | [`infra/`](infra/README.md) | `gcloud` bootstrap, secrets, and deploy scripts |
 | [`windows/`](windows/README.md) | Desktop PATH plugin and Desktop ↔ listener sync sidecar (Windows) |
 | [`macos/`](macos/README.md) | Same PATH plugin and sync sidecar for Buzz Desktop on macOS |
+| [`tests/`](tests/) | Unit tests; folders mirror the packages (`tests/listener`, `tests/goose-job`, `tests/litellm`) |
 
 ## Prerequisites
 
@@ -132,14 +133,9 @@ Redeploy a single piece without the full stack: `infra/deploy-litellm.ps1`, `inf
 ## Tests (no GCP)
 
 ```powershell
-cd listener
-python -m unittest test_agentutil.py test_taskmcp.py
-
-cd ..\goose-job
-python -m unittest test_worker.py test_activity.py test_goosehints.py test_litellm_proxy.py
-
-cd ..\litellm
-python -m unittest test_merge_extension_keywords.py
+python -m unittest discover -s tests/listener
+python -m unittest discover -s tests/goose-job
+python -m unittest discover -s tests/litellm
 ```
 
 Smoke LiteLLM without making the service public:

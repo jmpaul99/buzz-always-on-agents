@@ -63,9 +63,10 @@ RUN python merge_extension_keywords.py goose-config litellm-config /app/config.y
 
 `disabled_extension_keywords` walks `extensions:` and, for each `enabled: false` slug, adds the slug, `name`, `display_name`, and ≥3-char tokens. Those are merged into `custom_technical_keywords`.
 
+From the repo root:
+
 ```powershell
-cd litellm
-python -m unittest test_merge_extension_keywords.py
+python -m unittest discover -s tests/litellm
 ```
 
 ## Smoke (does not make the service public)

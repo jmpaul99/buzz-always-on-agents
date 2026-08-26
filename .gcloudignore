@@ -14,3 +14,4 @@ stack.env
 id_ed25519*
 .cursor
 agent-transcripts
+tests

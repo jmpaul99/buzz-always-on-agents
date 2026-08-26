@@ -5,4 +5,6 @@ Task MCPs stay off until needed (generic path) or are already on (recipe path).
 
 Generic path: enable by config name with manage_extensions, or search_available_extensions once if unknown. After enable, discover tools with list_functions, list_resources, or the Available tools list on a -32002. Goose names tools extension__tool. Never invent names. Disable the task MCP before the channel reply.
 
+The user only sees the Buzz channel. A text-only answer is not delivered — run `buzz messages send` before you stop.
+
 Do not dump env or secrets. Do not enable Code Mode.

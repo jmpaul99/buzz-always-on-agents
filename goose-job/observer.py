@@ -190,6 +190,25 @@ class ObserverPublisher:
                 },
             },
         )
+        self.emit_thought("Starting Goose…")
+
+    def emit_thought(self, text: str) -> None:
+        cleaned = redact(text).strip()
+        if not cleaned:
+            return
+        self.emit(
+            "acp_read",
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "update": {
+                        "sessionUpdate": "agent_thought_chunk",
+                        "content": {"type": "text", "text": cleaned[:400]},
+                    },
+                },
+            },
+        )
 
     def emit_turn_error(self, error: str) -> None:
         self.emit("turn_error", {"outcome": "error", "error": error[:1000]})

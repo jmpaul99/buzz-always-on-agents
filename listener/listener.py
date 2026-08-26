@@ -166,6 +166,8 @@ def execute_job(agent: dict[str, Any], evt: dict[str, Any]) -> None:
                 "BUZZ_OWNER_PUBKEY": agent.get("owner") or "",
                 "BUZZ_AUTHOR_PUBKEY": author,
                 "BUZZ_MESSAGE": content[:8000],
+                "BUZZ_IDENTITY": identity[:8000],
+                "BUZZ_SEND_CMD": send_cmd,
                 "GOOSE_RECIPE": recipe,
             },
         },

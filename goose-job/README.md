@@ -67,6 +67,7 @@ Isolation: each agent gets `/tmp/goose-<slug>` with its own `HOME`, `XDG_CONFIG_
 | `GOOSE_TIMEOUT_SECS` | 1500 | Hard kill of the Goose process |
 | `GOOSE_IDLE_TIMEOUT_SECS` | 180 | Kill if no parser activity before a channel reply |
 | Reply grace | 20s | After `buzz messages send` is seen, idle this long then stop (success) |
+| Fallback send | after Goose exits | If no channel send was seen, worker posts Goose's last text (or a short notice) |
 | Cloud Run request timeout | 3600s | Service deploy |
 
 Activity is Goose stdout **or** LiteLLM sidecar `/activity` (`in_flight > 0`). Liveness frames go to the observer every 10s while a turn is running.
@@ -76,9 +77,9 @@ Activity is Goose stdout **or** LiteLLM sidecar `/activity` (`in_flight > 0`). L
 `build_goose_cmd`:
 
 - If `GOOSE_RECIPE` matches `/home/goose/recipes/<slug>/recipe.yaml`, run `goose run --recipe … --params message=…` (task MCP already enabled in that recipe).
-- Else `goose run -t <prompt>` with always-on extensions only. Goose should `manage_extensions` for a task MCP when needed (see [`goose/guardrails.md`](../goose/guardrails.md)).
+- Else the generated `reply` recipe (always-on extensions + send-required instructions). `-t` is only a last resort if that file is missing.
 
-Always `--no-session --quiet --output-format stream-json`.
+Always `--no-session --output-format stream-json` (not `--quiet`, so thoughts stay on the wire). `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low` so Desktop Agent Activity gets reasoning + tools.
 
 ## Observer (kind 24200)
 
@@ -117,9 +118,10 @@ Set in [`infra/deploy-goose-job.ps1`](../infra/deploy-goose-job.ps1): 2 vCPU / 4
 
 ## Tests
 
+From the repo root:
+
 ```powershell
-cd goose-job
-python -m unittest test_worker.py test_activity.py test_goosehints.py test_litellm_proxy.py
+python -m unittest discover -s tests/goose-job
 ```
 
 No Docker/GCP. Cover HOME sync, recipe argv, activity parsing/redaction, guardrail copy, and proxy stream/tool-name rewrites.

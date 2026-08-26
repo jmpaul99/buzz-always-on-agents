@@ -1,7 +1,6 @@
 #Requires -Version 5.1
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "_common.ps1")
-$Root = Split-Path -Parent $PSScriptRoot
 $image = "${Ar}/goose-buzz:latest"
 $gooseSa = "$($C.GOOSE_SA)@$Project.iam.gserviceaccount.com"
 $cb = Join-Path $PSScriptRoot "cloudbuild-goose.yaml"

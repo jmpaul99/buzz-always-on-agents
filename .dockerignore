@@ -9,4 +9,5 @@
 stack.env
 windows
 macos
+tests
 .github

@@ -1,7 +1,6 @@
 #Requires -Version 5.1
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "_common.ps1")
-$Root = Split-Path -Parent $PSScriptRoot
 $listenerDir = Join-Path $Root "listener"
 $sa = "$($C.LISTENER_SA)@$Project.iam.gserviceaccount.com"
 $inst = $C.LISTENER_INSTANCE

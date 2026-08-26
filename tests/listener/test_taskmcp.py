@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "goose"))
 sys.path.insert(0, str(ROOT / "listener"))
 
@@ -42,11 +42,29 @@ class RecipeGenerateTest(unittest.TestCase):
             slugs = generate_recipes.write_recipes(CONFIG, out, catalog)
             self.assertIn("github", slugs)
             self.assertIn("playwright", slugs)
+            self.assertNotIn("reply", slugs)
+            reply = (out / "reply" / "recipe.yaml").read_text(encoding="utf-8")
+            self.assertIn("buzz messages send", reply)
+            self.assertIn("text instead of send", reply)
+            self.assertIn("max_turns: 25", reply)
+            self.assertIn("name: developer", reply)
+            self.assertNotIn("name: github", reply)
             github = (out / "github" / "recipe.yaml").read_text(encoding="utf-8")
             self.assertIn("name: github", github)
             self.assertIn("name: developer", github)
             self.assertIn("name: tom", github)
             self.assertIn("{{ message }}", github)
+            self.assertIn("{{ send_cmd }}", github)
+            self.assertIn("{{ identity }}", github)
+            self.assertIn("buzz messages send", github)
+            self.assertIn("max_turns: 25", github)
+            try:
+                import yaml  # type: ignore
+            except ImportError:
+                yaml = None
+            if yaml is not None:
+                yaml.safe_load(reply)
+                yaml.safe_load(github)
             self.assertNotIn("list_repositories", github)
             self.assertNotIn("available_tools", github)
             self.assertNotIn("extensionmanager", github.lower())

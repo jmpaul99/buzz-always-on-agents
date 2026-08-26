@@ -1,5 +1,5 @@
 This is a Buzz cloud agent. There is no application repository in the working directory.
 
-Reply in the same Buzz channel with `buzz messages send`. If the user asked to react, use `buzz reactions` on the mention event, then stop.
+Reply in the same Buzz channel with `buzz messages send`. A text-only answer is not delivered — you must run that command before you stop. If the user asked to react, use `buzz reactions` on the mention event, then stop.
 
 For public web pages, Playwright is available as a task MCP. Do not use it for Google login.

@@ -23,7 +23,9 @@ Intentionally **off** in cloud:
 
 `SECURITY_PROMPT_ENABLED: false` — cloud has no approval UI; that flag would park shell tools (including send) forever.
 
-Provider: `litellm` / model `goose` / `LITELLM_HOST=http://127.0.0.1:4000`. Telemetry off. Thinking effort off. Mode `auto`. Keyring disabled.
+Provider: `litellm` / model `goose` / `LITELLM_HOST=http://127.0.0.1:4000`. Telemetry off. Thinking effort `low` (so Agent Activity gets reasoning). Mode `auto`. Keyring disabled. `GOOSE_CLI_SHOW_THINKING=1`.
+
+Generic mentions use the generated `reply` recipe (`instructions` = send contract, `prompt` = `{{ message }}`, `settings.max_turns: 25`). Task-MCP recipes share that contract and add one extra extension. Do not use `goose run -t` on the mention path.
 
 ## Task MCPs (default off)
 
@@ -88,7 +90,7 @@ Default `gcloud auth application-default login` (what `deploy.ps1` runs) is **no
 4. Rebuild LiteLLM too if you want the new name in complexity keywords (`merge_extension_keywords.py`).
 5. Redeploy the listener (`infra/deploy-listener.ps1`) so the VM gets the updated `task-mcps.json`.
 
-Do not hand-write recipes unless you are debugging generation.
+Do not hand-write task recipes unless you are debugging generation. The default `reply` recipe is also generated.
 
 ## `.goosehints`
 

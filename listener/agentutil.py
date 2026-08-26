@@ -498,6 +498,7 @@ def build_goose_prompt(
         "(including Playwright for public web pages if needed). "
         "Put the full user-visible answer in one channel reply — every part of a multi-ask. "
         f"Send with: {send_cmd}\n"
+        "A text-only answer is not delivered. You must run that send command before you stop. "
         "Do not add --reply-to unless it is already in that command. "
         "If the user asked to react, run buzz reactions on this mention's Event id "
         "in the same turn as the send, then stop. "

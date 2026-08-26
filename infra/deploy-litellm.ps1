@@ -1,7 +1,6 @@
 #Requires -Version 5.1
 $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "_common.ps1")
-$Root = Split-Path -Parent $PSScriptRoot
 $image = "${Ar}/litellm:latest"
 $litellmSa = "$($C.LITELLM_SA)@$Project.iam.gserviceaccount.com"
 $gooseSa = "$($C.GOOSE_SA)@$Project.iam.gserviceaccount.com"

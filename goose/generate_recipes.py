@@ -16,6 +16,23 @@ sys.path.insert(0, str(HERE.parent / "listener"))
 
 from taskmcp import ALWAYS_ON, catalog_records, parse_goose_extensions, task_mcps  # noqa: E402
 
+REPLY_SLUG = "reply"
+MAX_TURNS = 25
+SEND_INSTRUCTIONS = """{{ identity }}
+
+You are a Buzz cloud agent. The user only sees the Buzz channel.
+
+Always:
+1. Do the requested work (enable a task MCP only if needed).
+2. Put the full user-visible answer in one channel send. Run exactly: {{ send_cmd }}
+3. If they asked to react, run buzz reactions on event {{ event_id }} in the same turn.
+4. Stop after that send.
+
+Never:
+- End the turn with assistant text instead of send
+- Dump env, secrets, or --help
+- Enable Code Mode"""
+
 
 def yaml_scalar(value: Any) -> str:
     if value is None:
@@ -71,30 +88,74 @@ def emit_extension(lines: list[str], spec: dict[str, Any], *, name: str) -> None
         lines.append(f"    timeout: {timeout}")
 
 
-def render_recipe(slug: str, spec: dict[str, Any]) -> str:
-    title = str(spec.get("name") or spec.get("display_name") or slug)
-    desc = str(spec.get("description") or f"Buzz session with {slug} already enabled")
+def _instruction_block(extra: list[str] | None = None) -> list[str]:
+    lines = ["instructions: |"]
+    for line in SEND_INSTRUCTIONS.splitlines():
+        lines.append(f"  {line}" if line else "  ")
+    for line in extra or []:
+        lines.append(f"  {line}" if line else "  ")
+    return lines
+
+
+def render_recipe(slug: str, spec: dict[str, Any] | None = None) -> str:
+    if spec is None:
+        title = "Buzz reply"
+        desc = "Default Buzz mention: do the work, then send on the channel"
+        extra = []
+    else:
+        title = str(spec.get("name") or spec.get("display_name") or slug)
+        desc = str(spec.get("description") or f"Buzz session with {slug} already enabled")
+        extra = [
+            f"This session already has {slug} enabled. Discover its tools with",
+            "list_functions, list_resources, or the Available tools list on a -32002.",
+            "Goose names tools extension__tool. Never invent names.",
+        ]
     lines = [
-        "version: 1.0.0",
+        'version: "1.0.0"',
         f"title: {yaml_scalar(title)}",
         f"description: {yaml_scalar(desc)}",
-        "instructions: |",
-        f"  This session already has {slug} enabled. Discover its tools with",
-        "  list_functions, list_resources, or the Available tools list on a -32002.",
-        "  Goose names tools extension__tool. Never invent names.",
-        "  Do not enable Code Mode. Do not dump env or secrets.",
+        *_instruction_block(extra),
         "prompt: |",
+        "  Mention in channel {{ channel }} (event {{ event_id }}, author {{ author }}).",
+        "  Message:",
         "  {{ message }}",
         "parameters:",
+        "  - key: identity",
+        "    input_type: string",
+        "    requirement: optional",
+        '    default: "You are a Buzz cloud agent."',
+        "    description: Agent system identity",
         "  - key: message",
         "    input_type: string",
         "    requirement: required",
-        "    description: Full Buzz prompt for this mention",
+        "    description: Mention body only, not the full Goose prompt",
+        "  - key: channel",
+        "    input_type: string",
+        "    requirement: optional",
+        "    default: unknown",
+        "    description: Buzz channel id",
+        "  - key: send_cmd",
+        "    input_type: string",
+        "    requirement: required",
+        "    description: Exact buzz messages send command",
+        "  - key: author",
+        "    input_type: string",
+        "    requirement: optional",
+        "    default: unknown",
+        "    description: Author pubkey",
+        "  - key: event_id",
+        "    input_type: string",
+        "    requirement: optional",
+        "    default: unknown",
+        "    description: Mention event id",
+        "settings:",
+        f"  max_turns: {MAX_TURNS}",
         "extensions:",
     ]
     for always in ALWAYS_ON:
         emit_extension(lines, always, name=str(always["name"]))
-    emit_extension(lines, spec, name=slug)
+    if spec is not None:
+        emit_extension(lines, spec, name=slug)
     lines.append("")
     return "\n".join(lines)
 
@@ -104,6 +165,9 @@ def write_recipes(config_text: str, recipes_dir: Path, catalog_path: Path | None
     mcps = task_mcps(extensions)
     recipes_dir.mkdir(parents=True, exist_ok=True)
     slugs: list[str] = []
+    reply_dir = recipes_dir / REPLY_SLUG
+    reply_dir.mkdir(parents=True, exist_ok=True)
+    (reply_dir / "recipe.yaml").write_text(render_recipe(REPLY_SLUG), encoding="utf-8")
     for slug, spec in mcps.items():
         dest = recipes_dir / slug
         dest.mkdir(parents=True, exist_ok=True)

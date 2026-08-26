@@ -32,7 +32,13 @@ GOOSE_TIMEOUT = int(os.environ.get("GOOSE_TIMEOUT_SECS", "1500"))
 GOOSE_IDLE_TIMEOUT = int(os.environ.get("GOOSE_IDLE_TIMEOUT_SECS", "180"))
 REPLY_GRACE_SECS = 20  # idle after last activity once the channel reply landed
 LIVENESS_SECS = 10
+SEND_TIMEOUT_SECS = 45
+FALLBACK_REPLY = (
+    "I finished this turn but did not post a channel reply. "
+    "Ask again if you still need an answer."
+)
 GOOSE_MAX_PARALLEL = max(1, int(os.environ.get("GOOSE_MAX_PARALLEL", "2")))
+DEFAULT_RECIPE = "reply"
 MAX_PROMPT = 20000
 BASE_HOME = pathlib.Path("/home/goose")
 LLM_ACTIVITY_URL = "http://127.0.0.1:4000/activity"
@@ -48,6 +54,8 @@ PASS_ENV = (
     "BUZZ_OWNER_PUBKEY",
     "BUZZ_AUTHOR_PUBKEY",
     "BUZZ_MESSAGE",
+    "BUZZ_IDENTITY",
+    "BUZZ_SEND_CMD",
     "GOOSE_RECIPE",
 )
 
@@ -138,27 +146,101 @@ def _drain_output(
                 pass
 
 
+def build_send_argv(channel: str, content: str, reply_to: str = "") -> list[str]:
+    cmd = ["buzz", "messages", "send", "--channel", channel, "--content", content]
+    if reply_to:
+        cmd.extend(["--reply-to", reply_to])
+    return cmd
+
+
+def _channel_send(env: dict[str, str], content: str) -> tuple[int, str]:
+    channel = (env.get("BUZZ_CHANNEL_ID") or "").strip()
+    if not channel:
+        return 1, "missing channel"
+    cmd = build_send_argv(channel, content[:8000], (env.get("REPLY_TO") or "").strip())
+    try:
+        proc = subprocess.run(
+            cmd,
+            env=env,
+            cwd=env.get("HOME") or None,
+            capture_output=True,
+            timeout=SEND_TIMEOUT_SECS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, type(exc).__name__
+    out = (proc.stdout or b"").decode("utf-8", errors="replace")
+    err = (proc.stderr or b"").decode("utf-8", errors="replace")
+    return int(proc.returncode), redact((out + "\n" + err).strip())[:500]
+
+
+def _fallback_send(env: dict[str, str], parser: GooseActivityParser) -> bool:
+    text = (parser.last_reply or "").strip() or FALLBACK_REPLY
+    log.info("fallback send agent=%s chars=%s", env.get("AGENT_NAME") or "-", len(text))
+    code, output = _channel_send(env, text)
+    channel = (env.get("BUZZ_CHANNEL_ID") or "").strip()
+    command = f"buzz messages send --channel {channel} --content '...'"
+    if (env.get("REPLY_TO") or "").strip():
+        command += f" --reply-to {env['REPLY_TO'].strip()}"
+    parser.record_external_send(command, output, ok=code == 0)
+    if code == 0:
+        return True
+    log.error("fallback send failed code=%s out=%s", code, output[:160])
+    return False
+
+
+def one_line(text: str, limit: int = 8000) -> str:
+    """Goose parses --params as YAML. Newlines in a value break the recipe file."""
+    return " ".join((text or "").split()).replace('"', "'")[:limit]
+
+
+def recipe_params(env: dict[str, str], prompt: str = "") -> dict[str, str]:
+    channel = (env.get("BUZZ_CHANNEL_ID") or "").strip()
+    reply_to = (env.get("REPLY_TO") or "").strip()
+    send_cmd = (env.get("BUZZ_SEND_CMD") or "").strip()
+    if not send_cmd and channel:
+        send_cmd = f"buzz messages send --channel {channel} --content '...'"
+        if reply_to:
+            send_cmd += f" --reply-to {reply_to}"
+    message = (env.get("BUZZ_MESSAGE") or prompt or "").strip()
+    return {
+        "identity": (env.get("BUZZ_IDENTITY") or "").strip() or "You are a Buzz cloud agent.",
+        "message": message,
+        "channel": channel or "unknown",
+        "send_cmd": send_cmd or "buzz messages send --content '...'",
+        "author": (env.get("BUZZ_AUTHOR_PUBKEY") or "").strip() or "unknown",
+        "event_id": (env.get("BUZZ_EVENT_ID") or "").strip() or "unknown",
+    }
+
+
 def build_goose_cmd(
     prompt: str,
     recipe: str = "",
     *,
     recipe_root: pathlib.Path | None = None,
+    params: dict[str, str] | None = None,
 ) -> list[str]:
     cmd = [
         "goose",
         "run",
         "--no-session",
-        "--quiet",
         "--output-format",
         "stream-json",
     ]
-    slug = (recipe or "").strip().lower()
+    slug = (recipe or "").strip().lower() or DEFAULT_RECIPE
     root = recipe_root
     if root is None:
         root = pathlib.Path(os.environ.get("GOOSE_RECIPE_PATH", "/home/goose/recipes"))
-    recipe_file = root / slug / "recipe.yaml" if slug else None
-    if recipe_file is not None and recipe_file.is_file():
-        cmd.extend(["--recipe", str(recipe_file), "--params", f"message={prompt}"])
+    recipe_file = root / slug / "recipe.yaml"
+    if recipe_file.is_file():
+        cmd.extend(["--recipe", str(recipe_file)])
+        values = dict(params or {})
+        values.setdefault("message", prompt)
+        values.setdefault("send_cmd", "buzz messages send --content '...'")
+        for key in ("identity", "message", "channel", "send_cmd", "author", "event_id"):
+            val = values.get(key)
+            if val is None:
+                continue
+            cmd.extend(["--params", f"{key}={one_line(str(val))}"])
         return cmd
     cmd.extend(["-t", prompt])
     return cmd
@@ -166,9 +248,10 @@ def build_goose_cmd(
 
 def _spawn_goose(env: dict[str, str], home: pathlib.Path) -> tuple[subprocess.Popen[bytes], Any]:
     cmd = build_goose_cmd(
-        env["PROMPT"],
+        env.get("PROMPT") or env.get("BUZZ_MESSAGE") or "",
         env.get("GOOSE_RECIPE", ""),
         recipe_root=pathlib.Path(env["GOOSE_RECIPE_PATH"]) if env.get("GOOSE_RECIPE_PATH") else None,
+        params=recipe_params(env, env.get("PROMPT") or ""),
     )
     env = dict(env)
     env.setdefault("TERM", "dumb")
@@ -215,11 +298,16 @@ def _run_goose(turn: Turn) -> None:
     env["PROMPT"] = prompt[:MAX_PROMPT]
     env["GOOSE_DISABLE_SESSION_NAMING"] = "true"
     env["GOOSE_DISABLE_KEYRING"] = "1"
+    env.setdefault("GOOSE_MAX_TURNS", "25")
+    env.setdefault("GOOSE_CLI_SHOW_THINKING", "1")
+    env.setdefault("GOOSE_THINKING_EFFORT", "low")
     home = _agent_home(turn.agent)
     env["HOME"] = str(home)
     env["XDG_CONFIG_HOME"] = str(home / ".config")
     env["npm_config_cache"] = str(home / ".npm")
     env.setdefault("GOOSE_RECIPE_PATH", "/home/goose/recipes")
+    if not (env.get("GOOSE_RECIPE") or "").strip():
+        env["GOOSE_RECIPE"] = DEFAULT_RECIPE
     guardrails = home / ".config" / "goose" / "guardrails.md"
     if guardrails.is_file():
         env["GOOSE_MOIM_MESSAGE_FILE"] = str(guardrails)
@@ -302,14 +390,25 @@ def _run_goose(turn: Turn) -> None:
                 proc.stdout.close()
             except OSError:
                 pass
+        if not parser.replied:
+            if _fallback_send(env, parser):
+                if not turn.error:
+                    turn.returncode = 0
+            elif not turn.error:
+                turn.returncode = 1
+                turn.error = "no channel reply"
         observer.close(turn.error)
-    if not turn.error:
-        log.info(
-            "goose done agent=%s code=%s secs=%.1f",
-            turn.agent,
-            turn.returncode,
-            time.monotonic() - started,
-        )
+    log.info(
+        "goose done agent=%s code=%s secs=%.1f replied=%s json=%s bytes=%s tool=%s err=%s",
+        turn.agent,
+        turn.returncode,
+        time.monotonic() - started,
+        parser.replied,
+        parser.json_events,
+        parser.stdout_bytes,
+        parser.last_tool or "-",
+        turn.error or "-",
+    )
 
 
 def _health_payload() -> dict[str, Any]:
