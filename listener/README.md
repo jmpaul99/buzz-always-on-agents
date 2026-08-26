@@ -9,26 +9,27 @@ Installed to `/opt/buzz-listener` by [`infra/deploy-listener.ps1`](../infra/depl
 1. Loads every `*.env` in `BUZZ_AGENTS_DIR` (default `/etc/buzz`) except names starting with `_`.
 2. Supervises one `agent_loop` per pubkey. Changing an env file changes its fingerprint; the supervisor cancels and restarts that loop within ~1s. No process bounce.
 3. After NIP-42 AUTH, HTTP-queries membership (kind 39002) and channel metadata (kind 39000), then `REQ`s each live channel.
-4. Stream/private channels filter `#p` to the agent pubkey (mentions). DMs subscribe without `#p`.
+4. Stream/private channels filter `#p` to the agent pubkey (mentions). DMs and forums subscribe without `#p`. Forums also `REQ` kinds `45001` / `45002` / `45003`.
 5. Live join/leave: kinds 44100 / 44101 / 39002 add or CLOSE channel subs without reconnecting.
-6. Matching events get 👀 + 💬 reactions and a typing heartbeat (kind 20002, every 3s).
-7. `POST {GOOSE_WORKER_URL}/run` with a metadata-server identity token. One in-flight worker call per agent (`threading.Lock`). A multi-`#p` mention POSTs once per tagged agent; Cloud Run concurrency 16 lets those land in the worker queue.
+6. Matching events get 👀 + 💬 reactions and a typing heartbeat (kind 20002, every 3s). Heartbeats and owner control commands do not.
+7. `POST {GOOSE_WORKER_URL}/run` with a metadata-server identity token. One in-flight worker call per agent (`threading.Lock`). Owner `!cancel` / `!rotate` `POST` `/cancel` (does not take that lock) and kill the Goose process. `!shutdown` is a no-op.
 8. When the agent’s own chat event arrives (or the worker returns), reactions are deleted (kind 5) and typing stops.
+9. Idle heartbeat (`BUZZ_ACP_HEARTBEAT_INTERVAL`, default `0` / off) `POST`s `/run` with a feed prompt when that agent is idle. At most one heartbeat in flight across agents. Set to ≥10s to enable.
 
 Dedup is `/var/lib/buzz-listener/seen.json` (last 4000 `{agent_pubkey}:{event_id}` keys). The same mention can still wake every agent who was `#p`-tagged. Presence kind 20001 (`online`) is published after AUTH.
 
 ## Mention rules (`agentutil.should_handle`)
 
-Handled kinds: `9`, `46010`, `40007`.
+Handled kinds: `9`, `46010`, `40007`, plus `45001` / `45002` / `45003` on forum channels.
 
 Skipped when:
 
 - the author is the agent itself
-- content is exactly `!shutdown`, `!cancel`, or `!rotate`
+- the owner sent `!shutdown`, `!cancel`, or `!rotate` while mentioning the agent (or in a DM) — those are consumed by the harness, not Goose
 - `respond_to` is `owner-only` / `owner` and the author is not the `auth` tag owner
 - `respond_to` is `allowlist` and the author is not on `BUZZ_ACP_RESPOND_TO_ALLOWLIST`
 - `BUZZ_CHANNEL_ALLOWLIST` is set and the event’s channel is not on it
-- the channel is not a DM and the agent is not `#p`-mentioned
+- the channel is a stream/private channel and the agent is not `#p`-mentioned (DMs and forums do not require a mention)
 
 ## Agent files
 
@@ -63,6 +64,7 @@ Firewall: IAP range `35.235.240.0/20` (`allow-iap-8743`) plus the default subnet
 | --- | --- | --- |
 | `GET` | `/health`, `/healthz` | `{"ok":true}` (no auth) |
 | `GET` | `/agents` | Roster for Desktop sync: slug, pubkey, display, prompt, permissions, `owner`, `updated_at`, `nsec`, `auth_tag`, `team_instructions`. **Sidecar token only** (never the Goose ID token). Never log the body. Sidecars import only agents this Desktop user can access. |
+| `GET` | `/agents/index` | Worker-only names: `{pubkey, slug, name}` (no nsec). Used by `buzz-cloud-agents list`; updates pass that `pubkey`. |
 | `POST` | `/agents` | Worker apply create. Mints nsec, owner-only, `auth_tag` owner = confirming human. Goose ID token. Body: `author_pubkey`, `actor_slug` or `actor_pubkey`, `name`, `system_prompt`. Returns `{ok, agent_id, pubkey}` (no nsec). |
 | `PUT` | `/agents/{pubkey}` | Sidecar upsert **or** worker apply update. Sidecar: `nsec` required on create; omitted on update keeps the existing key. Worker: owner-gated; cannot set `nsec`; forces `updated_at` now. |
 | `DELETE` | `/agents/{pubkey}` | Sidecar token. Removes `.env`, `.instructions`, and `.team`. Idempotent. |
@@ -119,6 +121,8 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 | `BUZZ_RELAY_URL` | from env files | Fallback relay |
 | `GOOSE_WORKER_URL` | empty (required) | Cloud Run `goose-worker` URL |
 | `GOOSE_WORKER_TIMEOUT` | `1620` | urllib timeout for `/run` |
+| `BUZZ_ACP_HEARTBEAT_INTERVAL` | `0` | Seconds between idle feed prompts. `0` disables (default, so Cloud Run can scale to zero). Values 1–9 disable. ≥10 enables. |
+| `BUZZ_ACP_HEARTBEAT_PROMPT` | (built-in feed prompt) | Override heartbeat prompt text |
 | `BUZZ_CONTROL_HOST` | `0.0.0.0` | Control API bind |
 | `BUZZ_CONTROL_PORT` | `8743` | Control API port |
 

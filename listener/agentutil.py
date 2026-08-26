@@ -10,7 +10,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-CHAT_KINDS = (9, 46010, 40007)
+STREAM_KINDS = (9, 46010, 40007)
+FORUM_KINDS = (45001, 45002, 45003)
+CHAT_KINDS = STREAM_KINDS + FORUM_KINDS
 MEMBER_KIND = 39002
 META_KIND = 39000
 MEMBER_ADDED_KIND = 44100
@@ -22,13 +24,21 @@ DELETE_KIND = 5
 REACTION_SEEN = "👀"
 REACTION_WORKING = "💬"
 TYPING_HEARTBEAT_SECS = 3.0
+CONTROL_COMMANDS = {"!shutdown", "!cancel", "!rotate"}
+LIVE_CHANNEL_TYPES = {"dm", "private", "stream", "forum"}
+DEFAULT_HEARTBEAT_SECS = 0
+DEFAULT_HEARTBEAT_PROMPT = (
+    "This is an idle heartbeat, not a user mention. "
+    "Run `buzz feed get` for pending approvals and unanswered mentions. "
+    "Act on anything that needs this agent using the Buzz CLI. "
+    "If nothing is actionable, do not send a channel message; end the turn immediately."
+)
 
 DEFAULT_RELAY = (os.environ.get("BUZZ_RELAY_URL") or "").strip() or "wss://your-community.communities.buzz.xyz"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 PUBKEY_RE = re.compile(r"^[0-9a-f]{64}$")
 OWNER_MODES = {"owner-only", "owner"}
 ALLOWLIST_MODES = {"allowlist"}
-SKIP_COMMANDS = {"!shutdown", "!cancel", "!rotate"}
 SEND_CONTENT_PLACEHOLDER = "<your-reply>"
 TURN_HINT = (
     "If other agents are mentioned too, still reply as yourself this turn; "
@@ -329,7 +339,45 @@ def channel_type_from_tags(tags: list) -> str:
         return "dm"
     if declared == "private" or is_private:
         return "private"
+    if declared == "forum":
+        return "forum"
     return "stream"
+
+
+def channel_req_filter(
+    channel_id: str,
+    ch_type: str,
+    since: int,
+    agent_pubkey: str,
+) -> dict[str, Any]:
+    """WSS REQ filter for one channel. Forum and DMs have no #p mention filter."""
+    kinds = list(CHAT_KINDS) if ch_type == "forum" else list(STREAM_KINDS)
+    filt: dict[str, Any] = {"kinds": kinds, "#h": [channel_id], "since": since}
+    if ch_type not in {"dm", "forum"}:
+        filt["#p"] = [agent_pubkey]
+    return filt
+
+
+def heartbeat_interval_secs(raw: str | None = None) -> int:
+    """0 disables. Native ACP rejects 1–9; we treat those as disabled."""
+    if raw is None:
+        raw = os.environ.get("BUZZ_ACP_HEARTBEAT_INTERVAL", str(DEFAULT_HEARTBEAT_SECS))
+    text = str(raw).strip()
+    if not text:
+        return DEFAULT_HEARTBEAT_SECS
+    try:
+        n = int(text)
+    except ValueError:
+        return 0
+    if n == 0 or n < 10:
+        return 0
+    return n
+
+
+def heartbeat_prompt(raw: str | None = None) -> str:
+    if raw is None:
+        raw = os.environ.get("BUZZ_ACP_HEARTBEAT_PROMPT", "")
+    return (raw or "").strip() or DEFAULT_HEARTBEAT_PROMPT
 
 
 def channel_sub_id(channel_id: str) -> str:
@@ -350,13 +398,36 @@ def author_allowed(agent: dict[str, Any], author: str) -> bool:
     return True
 
 
+def mentioned_in(agent: dict[str, Any], evt: dict[str, Any]) -> bool:
+    return agent.get("pubkey") in all_tag_values(evt.get("tags") or [], "p")
+
+
+def owner_control_command(
+    agent: dict[str, Any], evt: dict[str, Any], channels: dict[str, str]
+) -> str:
+    """Owner !cancel / !rotate / !shutdown when mentioned or in a DM. Else empty."""
+    content = str(evt.get("content") or "").strip()
+    if content not in CONTROL_COMMANDS:
+        return ""
+    if evt.get("kind") not in CHAT_KINDS:
+        return ""
+    owner = (agent.get("owner") or "").lower()
+    author = str(evt.get("pubkey") or "").lower()
+    if not owner or author != owner:
+        return ""
+    channel = channel_from_event(evt)
+    ch_type = channels.get(channel, "stream")
+    if ch_type != "dm" and not mentioned_in(agent, evt):
+        return ""
+    return content
+
+
 def should_handle(agent: dict[str, Any], evt: dict[str, Any], channels: dict[str, str]) -> bool:
     if evt.get("kind") not in CHAT_KINDS:
         return False
     if evt.get("pubkey") == agent.get("pubkey"):
         return False
-    content = str(evt.get("content") or "")
-    if content.strip() in SKIP_COMMANDS:
+    if owner_control_command(agent, evt, channels):
         return False
     if not author_allowed(agent, str(evt.get("pubkey") or "")):
         return False
@@ -365,11 +436,9 @@ def should_handle(agent: dict[str, Any], evt: dict[str, Any], channels: dict[str
     if allow and channel and channel not in allow:
         return False
     ch_type = channels.get(channel, "stream")
-    tags = evt.get("tags") or []
-    mentioned = agent.get("pubkey") in all_tag_values(tags, "p")
-    if ch_type == "dm":
+    if ch_type in {"dm", "forum"}:
         return True
-    return mentioned
+    return mentioned_in(agent, evt)
 
 
 def apply_membership_event(
@@ -386,7 +455,7 @@ def apply_membership_event(
             ch_type = channels.get(channel_id) or channel_type_from_tags(evt.get("tags") or [])
             if ch_type == "archived":
                 continue
-            if ch_type not in {"dm", "private", "stream"}:
+            if ch_type not in LIVE_CHANNEL_TYPES:
                 ch_type = "stream"
             channels.setdefault(channel_id, ch_type)
             if channel_id not in subscribed:
@@ -549,8 +618,7 @@ def build_goose_prompt(
         "do not wait for them and do not speak for them. "
         "A text-only answer is not delivered. You must run that send command before you stop. "
         "Do not add --reply-to unless it is already in that command. "
-        "If the user asked to react, run buzz reactions on this mention's Event id "
-        "in the same turn as the send, then stop. "
+        "You may use buzz reactions on this mention's Event id. "
         "Shell tools require a non-empty command argument. "
         "Do not print env or echo secrets. "
         "Summarize browsing; do not attach large screenshots."

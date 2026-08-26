@@ -60,6 +60,8 @@ PASS_ENV = (
     "BUZZ_WORKSPACE",
     "GOOSE_RECIPE",
     "LISTENER_CONTROL_URL",
+    "BUZZ_HEARTBEAT",
+    "BUZZ_PUBKEY",
 )
 
 
@@ -70,6 +72,7 @@ class Turn:
         self.prompt = prompt
         self.returncode = 1
         self.error = ""
+        self.cancelled = False
         self.done = threading.Event()
 
 
@@ -91,6 +94,7 @@ _sched_lock = threading.Lock()
 _agent_queues: dict[str, deque[Turn]] = {}
 _agent_order: deque[str] = deque()
 _running_agents: set[str] = set()
+_live: dict[str, tuple[Turn, subprocess.Popen[bytes]]] = {}
 _pool: ThreadPoolExecutor | None = None
 
 
@@ -374,6 +378,7 @@ def _run_goose(turn: Turn) -> None:
         on_reply=replied.set,
     )
     out: Any = None
+    proc: subprocess.Popen[bytes] | None = None
     try:
         proc, out = _spawn_goose(env, home, cwd)
     except OSError as exc:
@@ -382,6 +387,10 @@ def _run_goose(turn: Turn) -> None:
         observer.close(turn.error)
         log.exception("goose spawn failed agent=%s", turn.agent)
         return
+    with _sched_lock:
+        _live[turn.agent] = (turn, proc)
+    if turn.cancelled:
+        _kill_proc(proc)
     reader = threading.Thread(
         target=_drain_output,
         args=(out, parser),
@@ -437,7 +446,9 @@ def _run_goose(turn: Turn) -> None:
                 break
             time.sleep(0.2)
     finally:
-        if proc.poll() is None:
+        with _sched_lock:
+            _live.pop(turn.agent, None)
+        if proc is not None and proc.poll() is None:
             _kill_proc(proc)
         if isinstance(out, int):
             try:
@@ -445,12 +456,16 @@ def _run_goose(turn: Turn) -> None:
             except OSError:
                 pass
         reader.join(timeout=2)
-        if proc.stdout is not None:
+        if proc is not None and proc.stdout is not None:
             try:
                 proc.stdout.close()
             except OSError:
                 pass
-        if not parser.replied:
+        heartbeat = (env.get("BUZZ_HEARTBEAT") or "").strip() == "1"
+        if turn.cancelled:
+            turn.returncode = 130
+            turn.error = "cancelled"
+        elif not parser.replied and not heartbeat:
             if _fallback_send(env, parser):
                 if not turn.error:
                     turn.returncode = 0
@@ -525,6 +540,40 @@ def _run_and_release(turn: Turn) -> None:
             _fill_slots_locked()
 
 
+def cancel_agent(agent: str) -> dict[str, Any]:
+    """Drop queued turns and kill the in-flight Goose process. Does not take the run lock."""
+    dropped = 0
+    proc: subprocess.Popen[bytes] | None = None
+    running = False
+    with _sched_lock:
+        q = _agent_queues.get(agent)
+        if q:
+            while q:
+                queued = q.popleft()
+                queued.cancelled = True
+                queued.error = "cancelled"
+                queued.returncode = 130
+                queued.done.set()
+                dropped += 1
+        live = _live.get(agent)
+        if live:
+            turn, proc = live
+            turn.cancelled = True
+            turn.error = "cancelled"
+            turn.returncode = 130
+            running = True
+    if proc is not None:
+        _kill_proc(proc)
+    log.info("cancel agent=%s running=%s dropped=%s", agent, running, dropped)
+    return {
+        "ok": True,
+        "cancelled": running or dropped > 0,
+        "running": running,
+        "dropped": dropped,
+        "agent": agent,
+    }
+
+
 def _submit(turn: Turn, wait_secs: int) -> bool:
     with _sched_lock:
         q = _agent_queues.setdefault(turn.agent, deque())
@@ -556,9 +605,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.split("?", 1)[0] != "/run":
-            self._send(404, {"ok": False, "error": "not found"})
-            return
+        path = self.path.split("?", 1)[0]
         length = int(self.headers.get("Content-Length") or 0)
         if length > 512_000:
             self._send(413, {"ok": False, "error": "payload too large"})
@@ -570,6 +617,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not isinstance(req, dict):
             self._send(400, {"ok": False, "error": "invalid json"})
+            return
+        if path == "/cancel":
+            agent = str(req.get("agent_name") or req.get("AGENT_NAME") or "agent")[:32]
+            self._send(200, cancel_agent(agent))
+            return
+        if path != "/run":
+            self._send(404, {"ok": False, "error": "not found"})
             return
         agent = str(req.get("agent_name") or req.get("AGENT_NAME") or "agent")[:32]
         prompt = str(req.get("prompt") or "")[:MAX_PROMPT]
@@ -592,7 +646,9 @@ class Handler(BaseHTTPRequestHandler):
         if not _submit(turn, GOOSE_TIMEOUT + 30):
             self._send(504, {"ok": False, "error": "queue wait timed out", "agent": agent})
             return
-        if turn.error in {"idle timeout", "goose timed out"}:
+        if turn.cancelled or turn.error == "cancelled":
+            code = 200
+        elif turn.error in {"idle timeout", "goose timed out"}:
             code = 504
         elif turn.returncode == 0:
             code = 200

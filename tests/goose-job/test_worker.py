@@ -9,14 +9,19 @@ _ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ROOT / "listener"))
 sys.path.insert(0, str(_ROOT / "goose-job"))
 
+from collections import deque
+
 from agenthome import sync_agent_home
 from worker import (
+    Turn,
     build_goose_cmd,
     build_send_argv,
+    cancel_agent,
     one_line,
     prepare_turn,
     recipe_params,
 )
+import worker as worker_mod
 
 
 class SyncAgentHomeTest(unittest.TestCase):
@@ -39,6 +44,10 @@ class SyncAgentHomeTest(unittest.TestCase):
             self.assertTrue(guardrails.is_file())
             self.assertIn("5 enabled extensions", guardrails.read_text(encoding="utf-8"))
             self.assertFalse((home / ".goosehints").exists())
+            gitconfig = (home / ".gitconfig").read_text(encoding="utf-8")
+            self.assertIn("helper = nostr", gitconfig)
+            self.assertIn("git-sign-nostr", gitconfig)
+            self.assertIn("useHttpPath = true", gitconfig)
 
 
 def _params(cmd: list[str]) -> dict[str, str]:
@@ -179,6 +188,32 @@ class PrepareTurnTest(unittest.TestCase):
             self.assertIn("5 enabled extensions", tom)
             self.assertIn("[Team Instructions]", tom)
             self.assertIn("[Workspace]", tom)
+
+
+class CancelAgentTest(unittest.TestCase):
+    def tearDown(self):
+        with worker_mod._sched_lock:
+            worker_mod._agent_queues.clear()
+            worker_mod._live.clear()
+
+    def test_unknown_is_noop(self):
+        result = cancel_agent("nobody")
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["cancelled"])
+        self.assertEqual(result["dropped"], 0)
+        self.assertFalse(result["running"])
+
+    def test_drops_queued_turns(self):
+        turn = Turn("fizz", {}, "hi")
+        with worker_mod._sched_lock:
+            worker_mod._agent_queues["fizz"] = deque([turn])
+        result = cancel_agent("fizz")
+        self.assertTrue(result["cancelled"])
+        self.assertEqual(result["dropped"], 1)
+        self.assertTrue(turn.done.is_set())
+        self.assertTrue(turn.cancelled)
+        self.assertEqual(turn.error, "cancelled")
+        self.assertEqual(turn.returncode, 130)
 
 
 if __name__ == "__main__":

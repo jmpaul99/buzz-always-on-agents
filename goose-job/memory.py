@@ -16,10 +16,14 @@ from typing import Any
 log = logging.getLogger("goose-memory")
 
 CORE_TIMEOUT_SECS = 8
-FETCH_TIMEOUT_SECS = 5
+FETCH_TIMEOUT_SECS = 12
 TEAM_CAP = 8000
 THREAD_CAP = 4000
 THREAD_MAX_MESSAGES = 12
+# clap: --format is on the root Cli, not the subcommand. After `get` it is exit 1.
+_COMPACT = ("--format", "compact")
+# Listener chat kinds plus CLI messages-get defaults (9 + stream v2/diff).
+CONTEXT_KINDS = "9,40002,40007,40008,45001,45002,45003,46010"
 CORE_NUDGE = (
     "[Agent Memory — core]\n"
     "No core memory is stored yet. After you learn durable identity, write it with:\n"
@@ -101,6 +105,27 @@ def _looks_absent(proc: subprocess.CompletedProcess[str]) -> bool:
     return any(marker in low for marker in _ABSENT_MARKERS)
 
 
+def _cli_error_category(proc: subprocess.CompletedProcess[str]) -> str:
+    """Buzz prints {error, message} on stderr. Log only the category, never message bodies."""
+    raw = (proc.stderr or "").strip()
+    if not raw:
+        return ""
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end <= start:
+            return ""
+        try:
+            obj = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return ""
+    if isinstance(obj, dict):
+        return str(obj.get("error") or "")[:40]
+    return ""
+
+
 def fetch_core(env: dict[str, str]) -> str:
     """ACP fail-closed core memory.
 
@@ -155,9 +180,13 @@ def fetch_canvas(env: dict[str, str]) -> str:
     channel = (env.get("BUZZ_CHANNEL_ID") or "").strip()
     if not channel:
         return ""
-    proc = run_buzz(["canvas", "get", "--channel", channel], env)
+    proc = run_buzz([*_COMPACT, "canvas", "get", "--channel", channel], env)
     if proc.returncode != 0:
-        log.info("canvas omitted reason=fetch-error code=%s", proc.returncode)
+        log.info(
+            "canvas omitted reason=fetch-error code=%s error=%s",
+            proc.returncode,
+            _cli_error_category(proc) or "-",
+        )
         return ""
     if not (proc.stdout or "").strip() and not (proc.stderr or "").strip():
         return ""
@@ -183,7 +212,11 @@ def fetch_huddle(env: dict[str, str]) -> str:
         return ""
     proc = run_buzz(["huddle", "get", "--channel", channel], env)
     if proc.returncode != 0:
-        log.info("huddle omitted reason=fetch-error code=%s", proc.returncode)
+        log.info(
+            "huddle omitted reason=fetch-error code=%s error=%s",
+            proc.returncode,
+            _cli_error_category(proc) or "-",
+        )
         return ""
     text = (proc.stdout or "").strip()
     if not text:
@@ -251,6 +284,7 @@ def fetch_thread(env: dict[str, str]) -> str:
         label = "Thread Context"
         proc = run_buzz(
             [
+                *_COMPACT,
                 "messages",
                 "thread",
                 "--channel",
@@ -266,16 +300,32 @@ def fetch_thread(env: dict[str, str]) -> str:
         kind = "get"
         label = "Conversation Context"
         proc = run_buzz(
-            ["messages", "get", "--channel", channel, "--limit", limit],
+            [
+                *_COMPACT,
+                "messages",
+                "get",
+                "--channel",
+                channel,
+                "--limit",
+                limit,
+                "--kinds",
+                CONTEXT_KINDS,
+            ],
             env,
         )
     if proc.returncode != 0:
-        log.info("%s omitted reason=fetch-error code=%s", kind, proc.returncode)
+        log.info(
+            "%s omitted reason=fetch-error code=%s error=%s",
+            kind,
+            proc.returncode,
+            _cli_error_category(proc) or "-",
+        )
         return ""
     body = _format_context_messages(_parse_message_list(proc.stdout or ""), skip_id)
     if not body:
         log.info("%s omitted reason=empty", kind)
         return ""
+    log.info("%s injected messages=%s chars=%s", kind, body.count("\n") + 1, len(body))
     return f"[{label}]\n" + body
 
 

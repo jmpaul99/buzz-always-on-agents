@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/sprig:/opt/goose:/usr/local/bin:${PATH}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl python3 python3-pip python3-venv tar xz-utils unzip \
+      ca-certificates curl git python3 python3-pip python3-venv tar xz-utils unzip \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 10001 goose \
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
@@ -31,6 +31,8 @@ RUN mkdir -p /opt/sprig /tmp/sprig && cd /tmp/sprig \
     && ln -sfn /opt/sprig/sprig /opt/sprig/buzz \
     && ln -sfn /opt/sprig/sprig /usr/local/bin/buzz \
     && ln -sfn /opt/sprig/sprig /usr/local/bin/sprig \
+    && ln -sfn /opt/sprig/sprig /usr/local/bin/git-credential-nostr \
+    && ln -sfn /opt/sprig/sprig /usr/local/bin/git-sign-nostr \
     && rm -rf /tmp/sprig
 
 ARG GOOSE_URL=https://github.com/block/goose/releases/latest/download/goose-x86_64-unknown-linux-gnu.tar.gz

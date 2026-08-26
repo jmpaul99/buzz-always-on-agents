@@ -13,6 +13,28 @@ def _copy_if_newer(src: pathlib.Path, dest: pathlib.Path) -> None:
         shutil.copy2(src, dest)
 
 
+GITCONFIG = """[credential]
+	helper = nostr
+	useHttpPath = true
+[gpg]
+	format = x509
+[gpg "x509"]
+	program = git-sign-nostr
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = true
+"""
+
+
+def write_gitconfig(home: pathlib.Path) -> pathlib.Path:
+    path = home / ".gitconfig"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file():
+        path.write_text(GITCONFIG, encoding="utf-8")
+    return path
+
+
 def sync_agent_home(base: pathlib.Path, home: pathlib.Path) -> None:
     cfg = home / ".config" / "goose"
     cfg.mkdir(parents=True, exist_ok=True)
@@ -25,3 +47,4 @@ def sync_agent_home(base: pathlib.Path, home: pathlib.Path) -> None:
     if gcloud_src.is_dir() and not gcloud_dest.exists():
         shutil.copytree(gcloud_src, gcloud_dest, dirs_exist_ok=True)
     (home / ".npm").mkdir(parents=True, exist_ok=True)
+    write_gitconfig(home)

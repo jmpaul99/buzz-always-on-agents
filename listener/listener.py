@@ -2,14 +2,17 @@
 """Always-on Buzz WSS listener. One connection per /etc/buzz/*.env agent.
 
 Buzz delivers chat only on channel-scoped (#h) subscriptions. After NIP-42 AUTH,
-discover membership, then REQ each channel. Mentions use #p; DMs do not.
-On matching events, add 👀/💬 reactions and a typing heartbeat, POST to the
-Goose Cloud Run service, then retract the reactions. Never prints nsecs.
+discover membership, then REQ each channel. Mentions use #p; DMs and forums do
+not. On matching events, add 👀/💬 reactions and a typing heartbeat, POST to the
+Goose Cloud Run service, then retract the reactions. Owner !cancel / !rotate
+kill the in-flight worker turn. Idle heartbeat POSTs /run with no reactions.
+Never prints nsecs.
 
 Hot-reloads /etc/buzz/*.env without restarting the process. Token-auth control
 API on BUZZ_CONTROL_HOST:BUZZ_CONTROL_PORT (default 0.0.0.0:8743; firewall IAP
 range plus Cloud Run Direct VPC). Sidecar uses `_sync.token`; Goose apply uses
-a Google ID token from the goose-job SA (POST/PUT only — never GET /agents).
+a Google ID token from the goose-job SA (POST/PUT, plus GET /agents/index).
+Never GET /agents (roster includes nsecs).
 """
 from __future__ import annotations
 
@@ -71,6 +74,9 @@ DELETE_KIND = au.DELETE_KIND
 # Re-export for tests that import listener.
 should_handle = au.should_handle
 channel_from_event = au.channel_from_event
+owner_control_command = au.owner_control_command
+
+_heartbeat_lock = asyncio.Lock()
 
 
 def load_agents() -> list[dict[str, Any]]:
@@ -150,13 +156,64 @@ def execute_job(agent: dict[str, Any], evt: dict[str, Any]) -> None:
                 "BUZZ_SEND_CMD": send_cmd,
                 "BUZZ_TEAM_INSTRUCTIONS": au.load_team_file(AGENTS_DIR, agent["name"]),
                 "GOOSE_RECIPE": recipe,
+                "BUZZ_PUBKEY": agent.get("pubkey") or "",
             },
         },
         separators=(",", ":"),
     ).encode("utf-8")
     log.info("enqueue worker agent=%s channel=%s event=%s recipe=%s", agent["name"], channel[:8], event_id[:12], recipe or "-")
     with _agent_run_lock(agent["name"]):
-        _post_worker(payload)
+        _post_worker("/run", payload)
+
+
+def execute_heartbeat_job(agent: dict[str, Any]) -> None:
+    prompt = au.heartbeat_prompt()[:20000]
+    identity = au.with_turn_hint(
+        au.load_instructions(AGENTS_DIR, agent["name"])
+        or f"You are the Buzz agent {agent['display']} ({agent['name']})."
+    )
+    if not GOOSE_WORKER_URL:
+        raise RuntimeError("GOOSE_WORKER_URL is not set")
+    payload = json.dumps(
+        {
+            "agent_name": agent["name"],
+            "prompt": prompt,
+            "recipe": "",
+            "env": {
+                "AGENT_NAME": agent["name"],
+                "BUZZ_PRIVATE_KEY": agent["nsec"],
+                "BUZZ_AUTH_TAG": agent.get("auth_tag_raw") or "",
+                "BUZZ_RELAY_URL": agent["relay"],
+                "BUZZ_CHANNEL_ID": "",
+                "BUZZ_EVENT_ID": "",
+                "REPLY_TO": "",
+                "PROMPT": prompt,
+                "BUZZ_OWNER_PUBKEY": agent.get("owner") or "",
+                "BUZZ_AUTHOR_PUBKEY": agent.get("owner") or "",
+                "BUZZ_MESSAGE": prompt[:8000],
+                "BUZZ_IDENTITY": identity[:8000],
+                "BUZZ_SEND_CMD": "buzz messages send --content '<your-reply>'",
+                "BUZZ_TEAM_INSTRUCTIONS": au.load_team_file(AGENTS_DIR, agent["name"]),
+                "BUZZ_HEARTBEAT": "1",
+                "BUZZ_PUBKEY": agent.get("pubkey") or "",
+            },
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    log.info("heartbeat worker agent=%s", agent["name"])
+    _post_worker("/run", payload)
+
+
+def _try_begin_run(name: str) -> bool:
+    return _agent_run_lock(name).acquire(blocking=False)
+
+
+def _end_run(name: str) -> None:
+    lock = _agent_run_lock(name)
+    try:
+        lock.release()
+    except RuntimeError:
+        pass
 
 
 _agent_run_locks: dict[str, threading.Lock] = {}
@@ -195,11 +252,18 @@ def _worker_id_token() -> str:
     return token
 
 
-def _post_worker(payload: bytes) -> None:
+def _post_cancel(agent_name: str) -> None:
+    payload = json.dumps({"agent_name": agent_name}, separators=(",", ":")).encode("utf-8")
+    log.info("cancel worker agent=%s", agent_name)
+    _post_worker("/cancel", payload)
+
+
+def _post_worker(path: str, payload: bytes) -> None:
     last_err = ""
+    timeout = 15 if path.rstrip("/").endswith("cancel") else GOOSE_WORKER_TIMEOUT
     for attempt in range(1, 4):
         req = urllib.request.Request(
-            f"{GOOSE_WORKER_URL}/run",
+            f"{GOOSE_WORKER_URL}{path}",
             data=payload,
             headers={
                 "Authorization": f"Bearer {_worker_id_token()}",
@@ -208,7 +272,7 @@ def _post_worker(payload: bytes) -> None:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=GOOSE_WORKER_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 status = resp.status
                 body = resp.read().decode("utf-8", errors="replace")
             log.info("worker ok status=%s body=%s", status, body[:200])
@@ -290,6 +354,12 @@ class TurnTracker:
         async with self._lock:
             return self._by_channel.pop(channel, None)
 
+    async def take_all(self) -> list[tuple[str, dict[str, Any]]]:
+        async with self._lock:
+            items = list(self._by_channel.items())
+            self._by_channel.clear()
+            return items
+
 
 async def _retract_reactions(
     agent: dict[str, Any], pub: WsPublisher, event_ids: list[str], channel: str = ""
@@ -360,9 +430,7 @@ async def subscribe_channel(
     if not channel_id or channel_id in subscribed:
         return
     sub_id = au.channel_sub_id(channel_id)
-    filt: dict[str, Any] = {"kinds": list(CHAT_KINDS), "#h": [channel_id], "since": since}
-    if ch_type != "dm":
-        filt["#p"] = [agent["pubkey"]]
+    filt = au.channel_req_filter(channel_id, ch_type, since, agent["pubkey"])
     await ws.send(json.dumps(["REQ", sub_id, filt]))
     subscribed.add(channel_id)
     log.info(
@@ -370,7 +438,7 @@ async def subscribe_channel(
         agent["name"],
         channel_id[:8],
         ch_type,
-        ch_type != "dm",
+        "#p" in filt,
     )
 
 
@@ -436,6 +504,48 @@ async def _typing_heartbeat(
             continue
 
 
+async def _run_owner_command(
+    agent: dict[str, Any], cmd: str, pub: WsPublisher, tracker: TurnTracker
+) -> None:
+    if cmd == "!shutdown":
+        log.info("owner shutdown ignored agent=%s", agent["name"])
+        return
+    try:
+        await asyncio.to_thread(_post_cancel, agent["name"])
+    except Exception:
+        log.exception("cancel worker failed for %s", agent["name"])
+    jobs = await tracker.take_all()
+    for channel, job in jobs:
+        job["stop"].set()
+        try:
+            await _retract_reactions(agent, pub, job.get("ids") or [], channel)
+        except Exception:
+            log.exception("reaction retract on cancel failed for %s", agent["name"])
+
+
+async def _agent_heartbeat(agent: dict[str, Any], stop: asyncio.Event) -> None:
+    interval = au.heartbeat_interval_secs()
+    if interval <= 0:
+        return
+    log.info("heartbeat interval=%s agent=%s", interval, agent["name"])
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except asyncio.TimeoutError:
+            pass
+        async with _heartbeat_lock:
+            if not _try_begin_run(agent["name"]):
+                log.info("heartbeat skip busy agent=%s", agent["name"])
+                continue
+            try:
+                await asyncio.to_thread(execute_heartbeat_job, agent)
+            except Exception:
+                log.exception("heartbeat failed for %s", agent["name"])
+            finally:
+                _end_run(agent["name"])
+
+
 async def _run_job(
     agent: dict[str, Any], evt: dict[str, Any], pub: WsPublisher, tracker: TurnTracker
 ) -> None:
@@ -473,9 +583,27 @@ async def _run_job(
 
 
 async def agent_loop(agent: dict[str, Any], seen: SeenStore) -> None:
-    relay = agent["relay"]
     pub = WsPublisher()
     tracker = TurnTracker()
+    stop_hb = asyncio.Event()
+    hb_task = asyncio.create_task(
+        _agent_heartbeat(agent, stop_hb), name=f"hb-{agent['name']}"
+    )
+    try:
+        await _agent_socket_loop(agent, seen, pub, tracker)
+    finally:
+        stop_hb.set()
+        hb_task.cancel()
+        try:
+            await hb_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def _agent_socket_loop(
+    agent: dict[str, Any], seen: SeenStore, pub: WsPublisher, tracker: TurnTracker
+) -> None:
+    relay = agent["relay"]
     while True:
         try:
             async with websockets.connect(relay, ping_interval=20, ping_timeout=20, max_size=2**22) as ws:
@@ -564,6 +692,20 @@ async def agent_loop(agent: dict[str, Any], seen: SeenStore) -> None:
                                         await _retract_reactions(agent, pub, job.get("ids") or [], channel)
                                     except Exception:
                                         log.exception("reaction retract on reply failed for %s", agent["name"])
+                                continue
+                            cmd = au.owner_control_command(agent, evt, channels)
+                            if cmd:
+                                seen.add(agent["pubkey"], eid)
+                                log.info(
+                                    "owner %s agent=%s channel=%s event=%s",
+                                    cmd,
+                                    agent["name"],
+                                    au.channel_from_event(evt)[:8],
+                                    eid[:12],
+                                )
+                                asyncio.create_task(
+                                    _run_owner_command(agent, cmd, pub, tracker)
+                                )
                                 continue
                             if not au.should_handle(agent, evt, channels):
                                 continue
@@ -695,6 +837,20 @@ def load_agent_record(*, pubkey: str = "", slug: str = "") -> dict[str, Any] | N
     return _agent_from_env_path(path)
 
 
+def list_agent_index() -> list[dict[str, Any]]:
+    """Name/slug/pubkey only. Never include nsec."""
+    out = []
+    for agent in load_agents():
+        out.append(
+            {
+                "pubkey": agent.get("pubkey") or "",
+                "slug": agent.get("name") or "",
+                "name": agent.get("display") or agent.get("name") or "",
+            }
+        )
+    return out
+
+
 def worker_token_ok(token: str) -> bool:
     if _worker_token_checker is not None:
         return bool(_worker_token_checker(token))
@@ -738,12 +894,13 @@ def _require_owner_actor(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 
 def worker_apply_create(body: dict[str, Any]) -> dict[str, Any]:
-    author, _actor = _require_owner_actor(body)
+    author, actor = _require_owner_actor(body)
     display = str(body.get("name") or body.get("display") or "").strip() or "agent"
     prompt = body.get("system_prompt")
     if prompt is None:
         raise ValueError("system_prompt required")
     nsec, pubkey = generate_nsec()
+    relay = str(body.get("relay_url") or body.get("relay") or actor.get("relay") or RELAY_URL)
     result = upsert_from_api(
         pubkey,
         {
@@ -753,7 +910,7 @@ def worker_apply_create(body: dict[str, Any]) -> dict[str, Any]:
             "system_prompt": str(prompt),
             "respond_to": "owner-only",
             "auth_tag": au.owner_auth_tag(author),
-            "relay_url": str(body.get("relay_url") or body.get("relay") or RELAY_URL),
+            "relay_url": relay,
             "updated_at": au.utc_now(),
         },
     )
@@ -916,6 +1073,12 @@ class ControlHandler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in {"/health", "/healthz"}:
             self._send(200, {"ok": True})
+            return
+        if path == "/agents/index":
+            if not self._worker_auth():
+                self._send(401, {"ok": False, "error": "unauthorized"})
+                return
+            self._send(200, {"ok": True, "agents": list_agent_index()})
             return
         if not self._auth():
             self._send(401, {"ok": False, "error": "unauthorized"})

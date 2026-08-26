@@ -25,6 +25,7 @@ Bind `0.0.0.0:$PORT` (Cloud Run injects `PORT`, default 8080). Invoker IAM only 
 | --- | --- | --- |
 | `GET` | `/`, `/health`, `/healthz` | Queue snapshot: `max_parallel`, `running`, `queued` |
 | `POST` | `/run` | One Goose turn. Waits until that turn finishes (up to `GOOSE_TIMEOUT_SECS + 30`). |
+| `POST` | `/cancel` | Kill that agent’s in-flight Goose process and drop queued turns. Same invoker IAM. |
 
 POST JSON:
 

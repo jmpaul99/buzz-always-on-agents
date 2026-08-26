@@ -180,6 +180,15 @@ class ControlApiTest(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertIn("nsec", str(payload.get("error") or "").lower())
 
+    def test_worker_index_has_no_nsec(self):
+        code, payload = self._req("GET", "/agents/index", WORKER)
+        self.assertEqual(code, 200, payload)
+        agents = payload.get("agents") or []
+        self.assertEqual(len(agents), 1)
+        self.assertEqual(agents[0]["slug"], "actor")
+        self.assertNotIn("nsec", agents[0])
+        self.assertEqual(len(agents[0].get("pubkey") or ""), 64)
+
 
 class GenerateNsecTest(unittest.TestCase):
     def test_roundtrip(self):

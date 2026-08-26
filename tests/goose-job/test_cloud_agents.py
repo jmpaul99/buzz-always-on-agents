@@ -62,7 +62,7 @@ class CloudAgentsTest(unittest.TestCase):
 
     def test_propose_apply_cancel(self):
         env = _env(BUZZ_WORKSPACE=self.ws)
-        proposed = ca.propose(env, name="Fizz", system_prompt="You are Fizz.")
+        proposed = ca.propose(env, name="Fizz", system_prompt="You are Fizz.", create=True)
         self.assertEqual(proposed["op"], "create")
         pending = ca.load_pending(env)
         self.assertEqual(pending["system_prompt"], "You are Fizz.")
@@ -102,27 +102,54 @@ class CloudAgentsTest(unittest.TestCase):
     def test_non_owner_refused(self):
         env = _env(BUZZ_WORKSPACE=self.ws, BUZZ_AUTHOR_PUBKEY=STRANGER)
         with self.assertRaises(SystemExit) as caught:
-            ca.propose(env, name="Fizz", system_prompt="nope")
+            ca.propose(env, name="Fizz", system_prompt="nope", create=True)
         self.assertIn("owner", str(caught.exception).lower())
 
     def test_cancel_drops_pending(self):
         env = _env(BUZZ_WORKSPACE=self.ws)
-        ca.propose(env, name="Fizz", system_prompt="You are Fizz.")
+        ca.propose(env, name="Fizz", system_prompt="You are Fizz.", create=True)
         self.assertTrue(ca.cancel(env)["cancelled"])
         self.assertIsNone(ca.load_pending(env))
 
     def test_cli_propose(self):
         env = _env(BUZZ_WORKSPACE=self.ws)
         code = ca.main(
-            ["propose", "--name", "Fizz", "--instructions", "You are Fizz."],
+            ["propose", "--create", "--name", "Fizz", "--instructions", "You are Fizz."],
             env=env,
         )
         self.assertEqual(code, 0)
         self.assertEqual(ca.load_pending(env)["name"], "Fizz")
 
+    def test_cli_propose_update_requires_pubkey(self):
+        env = _env(BUZZ_WORKSPACE=self.ws)
+        code = ca.main(
+            ["propose", "--name", "Fizz", "--instructions", "You are Fizz."],
+            env=env,
+        )
+        self.assertEqual(code, 2)
+        self.assertIsNone(ca.load_pending(env))
+
+    def test_cli_propose_update(self):
+        env = _env(BUZZ_WORKSPACE=self.ws)
+        code = ca.main(
+            [
+                "propose",
+                "--pubkey",
+                AGENT,
+                "--name",
+                "Fizz",
+                "--instructions",
+                "You are Fizz.",
+            ],
+            env=env,
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(ca.load_pending(env)["op"], "update")
+        self.assertEqual(ca.load_pending(env)["pubkey"], AGENT)
+
     def test_http_error(self):
         env = _env(BUZZ_WORKSPACE=self.ws, BUZZ_MESSAGE="confirm")
-        ca.propose(env, name="Fizz", system_prompt="You are Fizz.")
+        ca.propose(env, name="Fizz", system_prompt="You are Fizz.", create=True)
 
         def request(req, timeout=0):
             raise HTTPError(
@@ -135,6 +162,31 @@ class CloudAgentsTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             ca.apply(env, request=request, token="jwt")
+
+    def test_propose_update_requires_pubkey(self):
+        env = _env(BUZZ_WORKSPACE=self.ws)
+        with self.assertRaises(SystemExit) as caught:
+            ca.propose(env, name="cloud-health", system_prompt="TEST")
+        self.assertIn("--pubkey", str(caught.exception))
+        self.assertIsNone(ca.load_pending(env))
+
+    def test_propose_create_rejects_pubkey(self):
+        env = _env(BUZZ_WORKSPACE=self.ws)
+        with self.assertRaises(SystemExit) as caught:
+            ca.propose(env, name="Fizz", system_prompt="You are Fizz.", pubkey=AGENT, create=True)
+        self.assertIn("not both", str(caught.exception))
+
+    def test_propose_update_stores_pubkey(self):
+        env = _env(BUZZ_WORKSPACE=self.ws)
+        proposed = ca.propose(
+            env,
+            name="Cloud Agent Health",
+            system_prompt="TEST AGENT INSTRUCTION CHANGE",
+            pubkey=AGENT,
+        )
+        self.assertEqual(proposed["op"], "update")
+        self.assertEqual(proposed["pubkey"], AGENT)
+        self.assertEqual(ca.load_pending(env)["pubkey"], AGENT)
 
 
 if __name__ == "__main__":

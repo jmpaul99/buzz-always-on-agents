@@ -20,6 +20,8 @@ import sys
 cmd = sys.argv[1:]
 mode = os.environ.get("FAKE_MODE", "")
 if cmd[:3] == ["mem", "get", "core"]:
+    if "--format" in cmd:
+        raise SystemExit(1)
     if mode == "found":
         print("I am Fizz, a helpful bee.")
         raise SystemExit(0)
@@ -30,18 +32,25 @@ if cmd[:3] == ["mem", "get", "core"]:
         print("decrypt failed", file=sys.stderr)
         raise SystemExit(2)
     raise SystemExit(1)
-if cmd[:2] == ["canvas", "get"]:
+if cmd[:2] == ["--format", "compact"] and cmd[2:4] == ["canvas", "get"]:
+    if "--format" in cmd[4:]:
+        raise SystemExit(1)
     if mode == "canvas":
         print(json.dumps({"event_id": "evt-1", "mtime": "2026-08-25"}))
         raise SystemExit(0)
     raise SystemExit(1)
 if cmd[:2] == ["huddle", "get"]:
+    if "--format" in cmd:
+        raise SystemExit(1)
     if mode == "huddle":
         print("Stay on topic.")
         raise SystemExit(0)
     raise SystemExit(1)
-if cmd[:2] == ["messages", "get"]:
-    if "--channel" not in cmd or "--limit" not in cmd:
+if cmd[:2] == ["--format", "compact"] and cmd[2:4] == ["messages", "get"]:
+    rest = cmd[4:]
+    if "--channel" not in rest or "--limit" not in rest or "--kinds" not in rest:
+        raise SystemExit(1)
+    if "--format" in rest:
         raise SystemExit(1)
     if mode == "get":
         print(
@@ -71,8 +80,11 @@ if cmd[:2] == ["messages", "get"]:
         )
         raise SystemExit(0)
     raise SystemExit(1)
-if cmd[:2] == ["messages", "thread"]:
-    if "--channel" not in cmd or "--event" not in cmd or "--id" in cmd:
+if cmd[:2] == ["--format", "compact"] and cmd[2:4] == ["messages", "thread"]:
+    rest = cmd[4:]
+    if "--channel" not in rest or "--event" not in rest or "--id" in rest:
+        raise SystemExit(1)
+    if "--format" in rest:
         raise SystemExit(1)
     if mode == "thread":
         print(
@@ -193,6 +205,26 @@ class StandingFetchTest(unittest.TestCase):
             )
             self.assertIn("[Thread Context]", section)
             self.assertIn("alice hi", section)
+
+    def test_misplaced_format_is_usage_error(self):
+        """Regression: `buzz messages get … --format compact` is clap exit 1."""
+        with tempfile.TemporaryDirectory() as raw:
+            env = _env(Path(raw), FAKE_MODE="get")
+            proc = memory.run_buzz(
+                ["messages", "get", "--channel", "chan-1", "--limit", "12", "--format", "compact"],
+                env,
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("update the agent", memory.fetch_thread(env))
+
+    def test_cli_error_category_skips_message_body(self):
+        proc = memory.subprocess.CompletedProcess(
+            ["buzz"],
+            1,
+            "",
+            '{"error":"usage","message":"secret chat body"}',
+        )
+        self.assertEqual(memory._cli_error_category(proc), "usage")
 
     def test_omit_on_cli_error(self):
         with tempfile.TemporaryDirectory() as raw:

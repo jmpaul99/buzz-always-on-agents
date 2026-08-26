@@ -63,8 +63,37 @@ class ShouldHandleTests(unittest.TestCase):
         self.assertTrue(au.should_handle(agent, _evt(OWNER, channel="chan-1"), {"chan-1": "stream"}))
         self.assertFalse(au.should_handle(agent, _evt(OWNER, channel="chan-2"), {"chan-2": "stream"}))
 
-    def test_control_commands_ignored(self):
-        self.assertFalse(au.should_handle(_agent(), _evt(OWNER, content="!shutdown"), {"chan-1": "stream"}))
+    def test_control_commands_owner_consumed(self):
+        agent = _agent()
+        channels = {"chan-1": "stream"}
+        for cmd in ("!shutdown", "!cancel", "!rotate"):
+            evt = _evt(OWNER, content=cmd)
+            self.assertEqual(au.owner_control_command(agent, evt, channels), cmd)
+            self.assertFalse(au.should_handle(agent, evt, channels))
+
+    def test_control_commands_non_owner_are_mentions(self):
+        agent = _agent(respond_to="allowlist", respond_to_allowlist=[FRIEND])
+        channels = {"chan-1": "stream"}
+        evt = _evt(FRIEND, content="!cancel")
+        self.assertEqual(au.owner_control_command(agent, evt, channels), "")
+        self.assertTrue(au.should_handle(agent, evt, channels))
+
+    def test_control_commands_need_mention_on_stream(self):
+        evt = _evt(OWNER, content="!cancel", mentioned=False)
+        self.assertEqual(au.owner_control_command(_agent(), evt, {"chan-1": "stream"}), "")
+        self.assertFalse(au.should_handle(_agent(), evt, {"chan-1": "stream"}))
+
+    def test_control_commands_dm_without_mention(self):
+        evt = _evt(OWNER, content="!rotate", mentioned=False)
+        self.assertEqual(au.owner_control_command(_agent(), evt, {"chan-1": "dm"}), "!rotate")
+
+    def test_forum_does_not_require_mention(self):
+        evt = _evt(OWNER, mentioned=False, kind=45001)
+        self.assertTrue(au.should_handle(_agent(), evt, {"chan-1": "forum"}))
+
+    def test_forum_still_respects_owner_only(self):
+        evt = _evt(STRANGER, mentioned=False, kind=45001)
+        self.assertFalse(au.should_handle(_agent(), evt, {"chan-1": "forum"}))
 
 
 class ReactionIndicatorTests(unittest.TestCase):
@@ -114,6 +143,42 @@ class MembershipTests(unittest.TestCase):
         self.assertEqual(sub, [])
         self.assertNotIn("room-9", channels)
         self.assertNotIn("room-9", subscribed)
+
+
+class ChannelTypeTests(unittest.TestCase):
+    def test_forum_from_t_tag(self):
+        self.assertEqual(au.channel_type_from_tags([["t", "forum"]]), "forum")
+
+    def test_forum_filter_has_no_mention(self):
+        filt = au.channel_req_filter("chan-1", "forum", 1, AGENT_PK)
+        self.assertNotIn("#p", filt)
+        self.assertIn(45001, filt["kinds"])
+        self.assertIn(9, filt["kinds"])
+
+    def test_stream_filter_mentions(self):
+        filt = au.channel_req_filter("chan-1", "stream", 1, AGENT_PK)
+        self.assertEqual(filt["#p"], [AGENT_PK])
+        self.assertNotIn(45001, filt["kinds"])
+
+    def test_dm_filter_has_no_mention(self):
+        filt = au.channel_req_filter("chan-1", "dm", 1, AGENT_PK)
+        self.assertNotIn("#p", filt)
+        self.assertNotIn(45001, filt["kinds"])
+
+
+class HeartbeatConfigTests(unittest.TestCase):
+    def test_interval(self):
+        self.assertEqual(au.heartbeat_interval_secs("300"), 300)
+        self.assertEqual(au.heartbeat_interval_secs("0"), 0)
+        self.assertEqual(au.heartbeat_interval_secs("9"), 0)
+        self.assertEqual(au.heartbeat_interval_secs("10"), 10)
+        self.assertEqual(au.heartbeat_interval_secs(""), 0)
+        self.assertEqual(au.heartbeat_interval_secs("nope"), 0)
+
+    def test_prompt_default(self):
+        text = au.heartbeat_prompt("")
+        self.assertIn("buzz feed get", text)
+        self.assertIn("heartbeat", text.lower())
 
 
 class RecordTests(unittest.TestCase):

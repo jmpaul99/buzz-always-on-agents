@@ -95,12 +95,24 @@ def drop_pending(env: dict[str, str]) -> bool:
         return False
 
 
+def fetch_index(
+    env: dict[str, str],
+    *,
+    request: RequestFn = urllib.request.urlopen,
+    token: str = "",
+) -> list[dict[str, Any]]:
+    data = _control_call(env, "GET", "/agents/index", None, request=request, token=token)
+    agents = data.get("agents") if isinstance(data.get("agents"), list) else []
+    return [a for a in agents if isinstance(a, dict)]
+
+
 def propose(
     env: dict[str, str],
     *,
     name: str,
     system_prompt: str,
     pubkey: str = "",
+    create: bool = False,
 ) -> dict[str, Any]:
     require_owner(env)
     name = (name or "").strip() or "agent"
@@ -108,16 +120,25 @@ def propose(
     if not prompt:
         raise SystemExit("instructions are required")
     pk = (pubkey or "").strip().lower()
-    if pk and len(pk) != PUBKEY_LEN:
+    if create and pk:
+        raise SystemExit("pass --pubkey to update or --create, not both")
+    if not create and not pk:
+        raise SystemExit(
+            "update requires --pubkey (64 hex); run list then propose --pubkey …; --create for a new identity"
+        )
+    if pk and (len(pk) != PUBKEY_LEN or any(ch not in "0123456789abcdef" for ch in pk)):
         raise SystemExit("pubkey must be 64 hex chars")
     payload = {
-        "op": "update" if pk else "create",
+        "op": "create" if create else "update",
         "name": name,
         "pubkey": pk,
         "system_prompt": prompt,
     }
     path = write_pending(env, payload)
-    return {"ok": True, "pending": str(path), "op": payload["op"], "name": name}
+    out = {"ok": True, "pending": str(path), "op": payload["op"], "name": name}
+    if pk:
+        out["pubkey"] = pk
+    return out
 
 
 def cancel(env: dict[str, str]) -> dict[str, Any]:
@@ -141,7 +162,7 @@ def _control_call(
     env: dict[str, str],
     method: str,
     path: str,
-    body: dict[str, Any],
+    body: dict[str, Any] | None,
     *,
     request: RequestFn = urllib.request.urlopen,
     token: str = "",
@@ -151,14 +172,15 @@ def _control_call(
         raise SystemExit("LISTENER_CONTROL_URL is not set")
     if not token:
         token = _id_token(base, request=request)
-    payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    headers = {"Authorization": f"Bearer {token}"}
+    data = None
+    if method != "GET":
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(body or {}, separators=(",", ":")).encode("utf-8")
     req = urllib.request.Request(
         f"{base}{path}",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
+        data=data,
+        headers=headers,
         method=method,
     )
     try:
@@ -233,8 +255,17 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
     parser = argparse.ArgumentParser(prog="buzz-cloud-agents")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_prop = sub.add_parser("propose", help="store pending create/update")
-    p_prop.add_argument("--name", required=True)
-    p_prop.add_argument("--pubkey", default="")
+    p_prop.add_argument("--name", required=True, help="display name (label, not the id)")
+    p_prop.add_argument(
+        "--pubkey",
+        default="",
+        help="64 hex agent id from list; required to update",
+    )
+    p_prop.add_argument(
+        "--create",
+        action="store_true",
+        help="mint a new identity (do not pass --pubkey)",
+    )
     p_prop.add_argument(
         "--instructions",
         required=True,
@@ -242,6 +273,7 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
     )
     sub.add_parser("apply", help="apply pending after user confirms")
     sub.add_parser("cancel", help="drop pending without applying")
+    sub.add_parser("list", help="list live cloud agents (name, slug, pubkey)")
     args = parser.parse_args(argv)
     try:
         if args.cmd == "propose":
@@ -249,10 +281,14 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None) -> in
                 env,
                 name=args.name,
                 pubkey=args.pubkey,
+                create=bool(args.create),
                 system_prompt=_read_instructions(args.instructions),
             )
         elif args.cmd == "apply":
             result = apply(env)
+        elif args.cmd == "list":
+            agents = fetch_index(env)
+            result = {"ok": True, "agents": agents}
         else:
             result = cancel(env)
     except SystemExit as exc:
