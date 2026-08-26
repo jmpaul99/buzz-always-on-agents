@@ -1,0 +1,16 @@
+.
+git
+**/.git
+**/__pycache__
+*.pyc
+.env
+.env.local
+*.env
+!*.env.example
+stack.env
+/secrets/
+*.nsec
+*.pem
+id_ed25519*
+.cursor
+agent-transcripts

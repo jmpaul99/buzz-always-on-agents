@@ -1,0 +1,17 @@
+.env
+.env.local
+*.env
+!*.env.example
+stack.env
+/secrets/
+*.nsec
+*.pem
+id_ed25519*
+application_default_credentials.json
+gcloud-adc-client.json
+google-oauth-client.json
+**/__pycache__/
+*.pyc
+*.b64.txt
+.DS_Store
+Thumbs.db

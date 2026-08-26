@@ -1,0 +1,153 @@
+# Virtual model "goose" — LiteLLM v1.94+ complexity auto-router.
+# LLM classifier is off (heuristic + keyword rules). Classifier can be added later.
+
+model_list:
+  # --- NIM (shared ~40 RPM nvapi- wallet) ---
+  - model_name: nemotron
+    litellm_params:
+      model: nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: nemotron
+  - model_name: deepseek-flash
+    litellm_params:
+      model: nvidia_nim/deepseek-ai/deepseek-v4-flash-0731
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: deepseek-flash
+  - model_name: minimax
+    litellm_params:
+      model: nvidia_nim/minimaxai/minimax-m3
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: minimax
+  - model_name: laguna
+    litellm_params:
+      model: nvidia_nim/poolside/laguna-xs-2.1
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: laguna
+  - model_name: step-flash
+    litellm_params:
+      model: nvidia_nim/stepfun-ai/step-3.7-flash
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+      rpm: 40
+    model_info:
+      id: step-flash
+
+  # --- Groq (own org limits) ---
+  - model_name: groq-fast
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_API_KEY
+      rpm: 30
+    model_info:
+      id: groq-fast
+  - model_name: groq-qwen
+    litellm_params:
+      model: groq/qwen/qwen3.6-27b
+      api_key: os.environ/GROQ_API_KEY
+      rpm: 30
+    model_info:
+      id: groq-qwen
+
+  # --- Gemini (own AI Studio project) ---
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-3.6-flash
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      id: gemini-flash
+  - model_name: gemini-lite
+    litellm_params:
+      model: gemini/gemini-3.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      id: gemini-lite
+
+  # --- OpenRouter last-resort (not in complexity tiers) ---
+  - model_name: openrouter-free
+    litellm_params:
+      model: openrouter/openrouter/free
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+    model_info:
+      id: openrouter-free
+  - model_name: openrouter-cheap
+    litellm_params:
+      model: openrouter/openrouter/auto
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+      extra_body:
+        plugins:
+          - id: auto-router
+            cost_tier: low
+    model_info:
+      id: openrouter-cheap
+
+  # --- Goose-facing alias ---
+  - model_name: goose
+    litellm_params:
+      model: auto_router/complexity_router
+      drop_params: true
+      complexity_router_config:
+        tiers:
+          SIMPLE: [groq-fast, deepseek-flash, gemini-lite]
+          MEDIUM: [nemotron, deepseek-flash, groq-qwen, gemini-lite]
+          COMPLEX: [minimax, laguna, step-flash, gemini-flash]
+          REASONING: [step-flash, gemini-flash]
+        adaptive: true
+        session_affinity: true
+        session_affinity_ttl_seconds: 3600
+        keyword_tier_rules:
+          - keywords: ["hi", "hello", "hey", "thanks", "thank you", "ping", "ok"]
+            tier: SIMPLE
+          - keywords: ["refactor", "implement", "debug", "traceback", "compile", "function"]
+            tier: COMPLEX
+          - keywords: ["step by step", "reason", "architecture", "tradeoff", "prove"]
+            tier: REASONING
+        # Greetings are SIMPLE via keywords. Score 0 must not fall through to SIMPLE
+        # (short mixed asks like "write a poem and react" have no technical signal).
+        tier_boundaries:
+          simple_medium: 0
+          medium_complex: 0.35
+          complex_reasoning: 0.60
+        token_thresholds:
+          simple: 0
+          complex: 400
+        # Disabled Goose MCP names are appended at image build
+        # (merge_extension_keywords.py) so routing stays extension-agnostic.
+        custom_technical_keywords:
+          [buzz, nostr, nsec, relay, systemd, aarch64, kubernetes, postgres]
+        default_model: nemotron
+      complexity_router_default_model: nemotron
+
+router_settings:
+  routing_strategy: simple-shuffle
+  allowed_fails: 1
+  cooldown_time: 30
+  num_retries: 2
+  retry_after: 5
+  enable_pre_call_checks: true
+  optional_pre_call_checks: [deployment_affinity, session_affinity]
+  deployment_affinity_ttl_seconds: 3600
+  timeout: 120
+  default_fallbacks:
+    - groq-fast
+    - groq-qwen
+    - deepseek-flash
+    - gemini-lite
+    - nemotron
+    - gemini-flash
+    - minimax
+    - laguna
+    - step-flash
+    - openrouter-free
+    - openrouter-cheap
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

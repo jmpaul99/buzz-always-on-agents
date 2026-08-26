@@ -1,0 +1,22 @@
+[Unit]
+Description=Buzz mention listener (WSS to Block-hosted relay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/buzz-listener
+Environment=BUZZ_AGENTS_DIR=/etc/buzz
+Environment=BUZZ_STATE_DIR=/var/lib/buzz-listener
+Environment=GOOSE_WORKER_URL=
+Environment=GOOSE_WORKER_TIMEOUT=1620
+Environment=BUZZ_CONTROL_HOST=0.0.0.0
+Environment=BUZZ_CONTROL_PORT=8743
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/buzz-listener/.venv/bin/python /opt/buzz-listener/listener.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

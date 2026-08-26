@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily keepalive so the free e2-micro is not reclaimed
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

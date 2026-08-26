@@ -1,0 +1,12 @@
+.git
+**/.git
+**/__pycache__
+*.pyc
+.env
+.env.local
+*.env
+!*.env.example
+stack.env
+windows
+macos
+.github
