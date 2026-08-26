@@ -39,12 +39,12 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 PUBKEY_RE = re.compile(r"^[0-9a-f]{64}$")
 OWNER_MODES = {"owner-only", "owner"}
 ALLOWLIST_MODES = {"allowlist"}
-SEND_CONTENT_PLACEHOLDER = "<your-reply>"
 TURN_HINT = (
     "If other agents are mentioned too, still reply as yourself this turn; "
     "do not wait for them and do not speak for them. "
-    f"Replace {SEND_CONTENT_PLACEHOLDER} in the send command with your real reply; "
-    "never send that placeholder, '...', or an empty message."
+    "Pipe the reply into that send command with a quoted heredoc (<<'EOF' … EOF). "
+    "Never put the message on the argv, never replace spaces with underscores, "
+    "and never send '...', or an empty message."
 )
 
 
@@ -612,8 +612,8 @@ def build_goose_prompt(
         "(including Playwright for public web pages if needed). "
         "Put the full user-visible answer in one channel reply — every part of a multi-ask. "
         f"Send with: {send_cmd}\n"
-        f"Replace {SEND_CONTENT_PLACEHOLDER} with your real reply; never send that "
-        "placeholder, '...', or an empty message. "
+        "Pipe the reply on stdin with a quoted heredoc; never splice it onto the "
+        "argv or replace spaces with underscores. Never send '...', or an empty message. "
         "Other agents may also be mentioned. Always reply as yourself in this turn; "
         "do not wait for them and do not speak for them. "
         "A text-only answer is not delivered. You must run that send command before you stop. "

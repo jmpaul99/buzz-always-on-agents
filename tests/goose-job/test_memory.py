@@ -198,6 +198,64 @@ class StandingFetchTest(unittest.TestCase):
             self.assertIn("line-19", section)
             self.assertIn("line-8", section)
 
+    def test_role_labels_you_user_other(self):
+        agent = "aa" * 32
+        author = "bb" * 32
+        other = "cc" * 32
+        body = memory._format_context_messages(
+            [
+                {"id": "1", "pubkey": agent, "content": "I posted", "created_at": 1},
+                {"id": "2", "pubkey": author, "content": "user said", "created_at": 2},
+                {"id": "3", "pubkey": other, "content": "someone else", "created_at": 3},
+                {"id": "now", "pubkey": author, "content": "current", "created_at": 4},
+            ],
+            "now",
+            {"BUZZ_PUBKEY": agent, "BUZZ_AUTHOR_PUBKEY": author},
+        )
+        self.assertEqual(
+            body,
+            "you (1): I posted\nuser (2): user said\nother (3): someone else",
+        )
+        self.assertNotIn("current", body)
+
+    def test_caps_by_whole_messages(self):
+        events = [
+            {
+                "id": f"e{i}",
+                "pubkey": "aa" * 32,
+                "content": f"MSG{i} " + ("word " * 80),
+                "created_at": i,
+            }
+            for i in range(12)
+        ]
+        body = memory._format_context_messages(events, "", {})
+        self.assertLessEqual(len(body), memory.THREAD_CAP)
+        self.assertIn("MSG11", body)
+        self.assertNotIn("MSG0 ", body)
+        for line in body.split("\n"):
+            self.assertRegex(line, r"^other \(\d+\): MSG\d+ ")
+            self.assertTrue(line.endswith("…") or "word" in line)
+        joined = "\n".join(body.split("\n"))
+        self.assertEqual(joined, body)
+
+    def test_per_message_cap_does_not_dominate(self):
+        body = memory._format_context_messages(
+            [
+                {
+                    "id": "long",
+                    "pubkey": "aa" * 32,
+                    "content": "START " + ("x" * 2000) + " END",
+                    "created_at": 1,
+                }
+            ],
+            "",
+            {},
+        )
+        self.assertLessEqual(len(body), memory.MESSAGE_CAP + 40)
+        self.assertIn("START", body)
+        self.assertNotIn(" END", body)
+        self.assertTrue(body.endswith("…"))
+
     def test_thread_requires_channel_and_event(self):
         with tempfile.TemporaryDirectory() as raw:
             section = memory.fetch_thread(

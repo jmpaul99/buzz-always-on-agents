@@ -86,8 +86,9 @@ class CloudAgentsTest(unittest.TestCase):
         self.assertIsNone(ca.load_pending(env))
 
     def test_apply_update_uses_put(self):
-        env = _env(BUZZ_WORKSPACE=self.ws, BUZZ_MESSAGE="confirm")
+        env = _env(BUZZ_WORKSPACE=self.ws)
         ca.propose(env, name="Actor", system_prompt="Updated.", pubkey=AGENT)
+        env["BUZZ_MESSAGE"] = "confirm"
         calls = []
 
         def request(req, timeout=0):
@@ -148,8 +149,9 @@ class CloudAgentsTest(unittest.TestCase):
         self.assertEqual(ca.load_pending(env)["pubkey"], AGENT)
 
     def test_http_error(self):
-        env = _env(BUZZ_WORKSPACE=self.ws, BUZZ_MESSAGE="confirm")
+        env = _env(BUZZ_WORKSPACE=self.ws)
         ca.propose(env, name="Fizz", system_prompt="You are Fizz.", create=True)
+        env["BUZZ_MESSAGE"] = "confirm"
 
         def request(req, timeout=0):
             raise HTTPError(
@@ -187,6 +189,43 @@ class CloudAgentsTest(unittest.TestCase):
         self.assertEqual(proposed["op"], "update")
         self.assertEqual(proposed["pubkey"], AGENT)
         self.assertEqual(ca.load_pending(env)["pubkey"], AGENT)
+
+    def test_propose_on_confirm_applies_stored(self):
+        env = _env(BUZZ_WORKSPACE=self.ws)
+        ca.propose(env, name="Fizz", system_prompt="You are Fizz.", create=True)
+        env["BUZZ_MESSAGE"] = "confirm"
+        bodies = []
+
+        def request(req, timeout=0):
+            bodies.append(json.loads(req.data.decode()))
+            return FakeResp(json.dumps({"ok": True, "agent_id": "fizz", "pubkey": AGENT}))
+
+        result = ca.propose(
+            env,
+            name="Nope",
+            system_prompt="GARBAGE",
+            create=True,
+            request=request,
+            token="jwt",
+        )
+        self.assertEqual(result["agent_id"], "fizz")
+        self.assertEqual(bodies[0]["system_prompt"], "You are Fizz.")
+        self.assertIsNone(ca.load_pending(env))
+
+    def test_propose_on_confirm_without_pending(self):
+        env = _env(BUZZ_WORKSPACE=self.ws, BUZZ_MESSAGE="confirm")
+        with self.assertRaises(SystemExit) as caught:
+            ca.propose(env, name="Fizz", system_prompt="GARBAGE", create=True)
+        self.assertIn("no pending", str(caught.exception))
+
+    def test_propose_on_cancel_refused(self):
+        env = _env(BUZZ_WORKSPACE=self.ws)
+        ca.propose(env, name="Fizz", system_prompt="You are Fizz.", create=True)
+        env["BUZZ_MESSAGE"] = "cancel"
+        with self.assertRaises(SystemExit) as caught:
+            ca.propose(env, name="Nope", system_prompt="GARBAGE", create=True)
+        self.assertIn("cancel", str(caught.exception).lower())
+        self.assertEqual(ca.load_pending(env)["system_prompt"], "You are Fizz.")
 
 
 if __name__ == "__main__":

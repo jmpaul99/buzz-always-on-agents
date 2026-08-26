@@ -47,7 +47,7 @@ POST JSON:
     "BUZZ_AUTHOR_PUBKEY": "…",
     "BUZZ_MESSAGE": "…",
     "BUZZ_IDENTITY": "…",
-    "BUZZ_SEND_CMD": "buzz messages send --channel … --content '<your-reply>'",
+    "BUZZ_SEND_CMD": "buzz messages send --channel … --content -",
     "BUZZ_TEAM_INSTRUCTIONS": "…",
     "BUZZ_WORKSPACE": "/mnt/buzz",
     "GOOSE_RECIPE": "playwright"
@@ -84,7 +84,7 @@ Activity is Goose stdout **or** LiteLLM sidecar `/activity` (`in_flight > 0`). L
 - If `GOOSE_RECIPE` matches `/home/goose/recipes/<slug>/recipe.yaml`, run `goose run --recipe … --params identity=… message=… send_cmd=…` (task MCP already enabled in that recipe).
 - Else the generated `reply` recipe (always-on extensions + send-required instructions). `-t` is only a last resort if that file is missing.
 
-`recipe_params` builds `send_cmd` as `buzz messages send --channel … --content '<your-reply>'` (plus `--reply-to` when set). Goose must replace `<your-reply>`; it must not send that placeholder, `...`, or an empty message. `BUZZ_IDENTITY` already includes the listener turn hint (multi-mention: reply as yourself this turn).
+`recipe_params` builds `send_cmd` as `buzz messages send --channel … --content -` (plus `--reply-to` when set). Goose must feed the reply on stdin with a quoted heredoc; it must not splice the message onto the argv, replace spaces with underscores, or send `...` / an empty message. `BUZZ_IDENTITY` already includes the listener turn hint (multi-mention: reply as yourself this turn).
 
 Always `--no-session --quiet --output-format stream-json`. Quiet drops recipe-load TUI; stream-json still carries thoughts/tools. Goose is attached to a PTY so JSON is not block-buffered (a pipe left `json=0 bytes=0` until exit, which is why activity arrived after the channel reply and Goose sent twice). The worker does **not** stop on the first or second channel send. It waits until Goose exits, idle-timeouts (no LLM/tools/parser activity), or `GOOSE_TIMEOUT_SECS`. `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low`.
 

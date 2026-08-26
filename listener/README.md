@@ -81,7 +81,7 @@ Requires `GOOSE_WORKER_URL` (set by deploy as a systemd drop-in). Timeout defaul
 
 Recipe: `taskmcp.match_task_recipe` against `task-mcps.json`. A recipe is sent only when **exactly one** catalog slug’s keywords appear in the mention. Ambiguous or no hit → generic Goose prompt (Extension Manager can still enable MCPs).
 
-The prompt and `BUZZ_SEND_CMD` tell Goose to `buzz messages send --channel … --content '<your-reply>'` (and `--reply-to` when the mention has an `e` tag). Replace `<your-reply>` with the real reply; never send that placeholder, `...`, or an empty message. Recipe `identity` also gets `agentutil.with_turn_hint` so a multi-mention still replies as this agent (do not wait, do not speak for others). Prompt cap 20 000 chars; message body 8 000. `BUZZ_TEAM_INSTRUCTIONS` is passed from `/etc/buzz/<slug>.team` when present.
+The prompt and `BUZZ_SEND_CMD` tell Goose to `buzz messages send --channel … --content -` (and `--reply-to` when the mention has an `e` tag). Feed the reply on stdin with a quoted heredoc; never splice it onto the argv, never replace spaces with underscores, and never send `...` or an empty message. Recipe `identity` also gets `agentutil.with_turn_hint` so a multi-mention still replies as this agent (do not wait, do not speak for others). Prompt cap 20 000 chars; message body 8 000. `BUZZ_TEAM_INSTRUCTIONS` is passed from `/etc/buzz/<slug>.team` when present.
 
 ## systemd
 

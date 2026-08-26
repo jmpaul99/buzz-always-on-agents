@@ -114,10 +114,7 @@ def execute_job(agent: dict[str, Any], evt: dict[str, Any]) -> None:
     content = str(evt.get("content") or "")
     author = str(evt.get("pubkey") or "")
     reply_to = au.tag_value(evt.get("tags") or [], "e") or ""
-    send_cmd = (
-        f"buzz messages send --channel {channel} "
-        f"--content '{au.SEND_CONTENT_PLACEHOLDER}'"
-    )
+    send_cmd = f"buzz messages send --channel {channel} --content -"
     if reply_to:
         send_cmd += f" --reply-to {reply_to}"
     identity = au.with_turn_hint(
@@ -192,7 +189,7 @@ def execute_heartbeat_job(agent: dict[str, Any]) -> None:
                 "BUZZ_AUTHOR_PUBKEY": agent.get("owner") or "",
                 "BUZZ_MESSAGE": prompt[:8000],
                 "BUZZ_IDENTITY": identity[:8000],
-                "BUZZ_SEND_CMD": "buzz messages send --content '<your-reply>'",
+                "BUZZ_SEND_CMD": "buzz messages send --content -",
                 "BUZZ_TEAM_INSTRUCTIONS": au.load_team_file(AGENTS_DIR, agent["name"]),
                 "BUZZ_HEARTBEAT": "1",
                 "BUZZ_PUBKEY": agent.get("pubkey") or "",

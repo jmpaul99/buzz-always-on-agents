@@ -570,7 +570,7 @@ class GoosePromptTests(unittest.TestCase):
             author=OWNER,
             event_id="e1",
             content="Write a poem and list my repos.",
-            send_cmd="buzz messages send --channel chan-1 --content '<your-reply>'",
+            send_cmd="buzz messages send --channel chan-1 --content -",
         )
 
     def test_drops_extension_budget_essay(self):
@@ -592,8 +592,9 @@ class GoosePromptTests(unittest.TestCase):
         low = self.prompt.lower()
         self.assertIn("other agents may also be mentioned", low)
         self.assertIn("always reply as yourself", low)
-        self.assertIn("<your-reply>", low)
-        self.assertIn("never send that placeholder", low)
+        self.assertIn("--content -", low)
+        self.assertIn("quoted heredoc", low)
+        self.assertIn("never send", low)
 
     def test_turn_hint_is_on_identity_for_recipe_path(self):
         hinted = au.with_turn_hint("You are Fizz.")

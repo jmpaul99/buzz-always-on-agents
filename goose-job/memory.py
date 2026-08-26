@@ -20,6 +20,7 @@ FETCH_TIMEOUT_SECS = 12
 TEAM_CAP = 8000
 THREAD_CAP = 4000
 THREAD_MAX_MESSAGES = 12
+MESSAGE_CAP = 500
 # clap: --format is on the root Cli, not the subcommand. After `get` it is exit 1.
 _COMPACT = ("--format", "compact")
 # Listener chat kinds plus CLI messages-get defaults (9 + stream v2/diff).
@@ -251,23 +252,48 @@ def _parse_message_list(text: str) -> list[dict[str, Any]]:
     return []
 
 
-def _format_context_messages(events: list[dict[str, Any]], skip_id: str) -> str:
+def _context_speaker(pubkey: str, env: dict[str, str]) -> str:
+    pk = (pubkey or "").strip().lower()
+    agent = (env.get("BUZZ_PUBKEY") or "").strip().lower()
+    author = (env.get("BUZZ_AUTHOR_PUBKEY") or "").strip().lower()
+    if pk and agent and pk == agent:
+        return "you"
+    if pk and author and pk == author:
+        return "user"
+    return "other"
+
+
+def _clip_message(content: str) -> str:
+    text = (content or "").strip()
+    if len(text) <= MESSAGE_CAP:
+        return text
+    return text[:MESSAGE_CAP].rstrip() + "…"
+
+
+def _format_context_messages(
+    events: list[dict[str, Any]],
+    skip_id: str,
+    env: dict[str, str] | None = None,
+) -> str:
+    env = env or {}
     rows: list[str] = []
     for ev in events:
         eid = str(ev.get("id") or "").strip()
         if skip_id and eid == skip_id:
             continue
-        content = str(ev.get("content") or "").strip()
+        content = _clip_message(str(ev.get("content") or ""))
         if not content:
             continue
         pubkey = str(ev.get("pubkey") or "").strip()
-        actor = (pubkey[:8] if pubkey else eid[:8]) or "msg"
+        actor = _context_speaker(pubkey, env)
         created = ev.get("created_at")
         ts = str(created) if created not in (None, "") else ""
         rows.append(f"{actor} ({ts}): {content}" if ts else f"{actor}: {content}")
     if len(rows) > THREAD_MAX_MESSAGES:
         rows = rows[-THREAD_MAX_MESSAGES:]
-    return "\n".join(rows)[:THREAD_CAP]
+    while len(rows) > 1 and len("\n".join(rows)) > THREAD_CAP:
+        rows.pop(0)
+    return "\n".join(rows)
 
 
 def fetch_thread(env: dict[str, str]) -> str:
@@ -321,7 +347,7 @@ def fetch_thread(env: dict[str, str]) -> str:
             _cli_error_category(proc) or "-",
         )
         return ""
-    body = _format_context_messages(_parse_message_list(proc.stdout or ""), skip_id)
+    body = _format_context_messages(_parse_message_list(proc.stdout or ""), skip_id, env)
     if not body:
         log.info("%s omitted reason=empty", kind)
         return ""

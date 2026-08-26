@@ -113,8 +113,15 @@ def propose(
     system_prompt: str,
     pubkey: str = "",
     create: bool = False,
+    request: RequestFn = urllib.request.urlopen,
+    token: str = "",
 ) -> dict[str, Any]:
     require_owner(env)
+    message = env.get("BUZZ_MESSAGE") or ""
+    if is_cancel(message):
+        raise SystemExit("cancel turn: run cancel; propose is refused")
+    if is_confirm(message):
+        return apply(env, request=request, token=token)
     name = (name or "").strip() or "agent"
     prompt = (system_prompt or "").strip()
     if not prompt:

@@ -35,7 +35,7 @@ Provider: `litellm` / model `goose` / `LITELLM_HOST=http://127.0.0.1:4000`. Tele
 
 Generic mentions use the generated `reply` recipe (`instructions` = send contract + Buzz CLI table, `prompt` = `{{ message }}`, `settings.max_turns: 25`). Task-MCP recipes share that contract and add one extra extension. Do not use `goose run -t` on the mention path.
 
-The send contract: post with `{{ send_cmd }}` (`buzz messages send --channel … --content '<your-reply>'`, plus `--reply-to` when the mention has an `e` tag). Replace `<your-reply>` with the actual text; never send that placeholder, `...`, or an empty message. If other agents are also `#p`-tagged, still reply as yourself this turn — do not wait for them and do not speak for them. The listener also puts that turn hint on recipe `identity` (`agentutil.with_turn_hint`), because the recipe path only sees identity + mention body.
+The send contract: post with `{{ send_cmd }}` (`buzz messages send --channel … --content -`, plus `--reply-to` when the mention has an `e` tag). Feed the reply on stdin with a quoted heredoc; never splice it onto the argv, never replace spaces with underscores, and never send `...` or an empty message. If other agents are also `#p`-tagged, still reply as yourself this turn — do not wait for them and do not speak for them. The listener also puts that turn hint on recipe `identity` (`agentutil.with_turn_hint`), because the recipe path only sees identity + mention body.
 
 Goose is a Buzz CLI power user (`buzz --help` allowed). The denylist is `buzz agents draft-create` / `draft-update` (use `buzz-cloud-agents` instead), `buzz mem rm core`, `buzz agents archive`, and spawning a second harness. Post user-visible updates with `buzz messages send`. Stop when the work is finished.
 
@@ -107,7 +107,7 @@ Do not hand-write task recipes unless you are debugging generation. The default 
 
 ## `.goosehints`
 
-Short standing instructions: GCS workspace at `/mnt/buzz` (`agents/`, `channels/`, `shared/`); reply with `buzz messages send` (replace `<your-reply>`; never send `...` or an empty message); if other agents are mentioned, still reply as yourself this turn; full Buzz CLI including `--help`; denylist `draft-create` / `draft-update`, `mem rm core`, `agents archive`, and a second harness; `buzz-cloud-agents` for instruction create/edit after chat confirm (no Desktop Save); Playwright is for public pages, not Google login.
+Short standing instructions: GCS workspace at `/mnt/buzz` (`agents/`, `channels/`, `shared/`); reply with `buzz messages send --content -` (quoted heredoc; never send `...` or an empty message); if other agents are mentioned, still reply as yourself this turn; full Buzz CLI including `--help`; denylist `draft-create` / `draft-update`, `mem rm core`, `agents archive`, and a second harness; `buzz-cloud-agents` for instruction create/edit after chat confirm (no Desktop Save); Playwright is for public pages, not Google login.
 
 ## Guardrails (Top of Mind)
 

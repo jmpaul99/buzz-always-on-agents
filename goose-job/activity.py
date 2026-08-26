@@ -41,6 +41,7 @@ SKIP_COMMAND_RE = re.compile(
     re.I,
 )
 ACCEPTED_RE = re.compile(r'"accepted"\s*:\s*true', re.I)
+CONTENT_STDIN_RE = re.compile(r"--content(?:\s+|=)(\S+)", re.I)
 MAX_THOUGHT = 400
 MAX_REPLY = 8000
 MAX_RESULT = 240
@@ -48,6 +49,14 @@ STREAM_TYPES = {"message", "notification", "error", "complete"}
 JSON_BUF_MAX = 200_000
 
 EmitFn = Callable[[str, dict[str, Any]], None]
+
+
+def _stdin_content(command: str) -> bool:
+    """True when messages send uses --content - (stdin), not an argv body."""
+    match = CONTENT_STDIN_RE.search(command or "")
+    if not match:
+        return False
+    return match.group(1).strip("'\"") == "-"
 
 
 @dataclass
@@ -494,6 +503,8 @@ class GooseActivityParser:
         if "reaction" in low:
             return False
         if "messages send" in low:
+            if command.strip() and not _stdin_content(command):
+                return False
             return True
         # Goose sometimes emits only the accepted JSON, with no command on that line.
         if command.strip():
@@ -565,12 +576,12 @@ class GooseActivityParser:
             return
         if not self.last_reply:
             self._store_reply(text)
-        if len(text) > MAX_THOUGHT:
-            text = text[:MAX_THOUGHT].rstrip() + "…"
-        self._emit_update(
-            "agent_thought_chunk",
-            {"content": {"type": "text", "text": text}},
-        )
+        while text:
+            chunk, text = text[:MAX_THOUGHT], text[MAX_THOUGHT:]
+            self._emit_update(
+                "agent_thought_chunk",
+                {"content": {"type": "text", "text": chunk}},
+            )
 
     def _emit_update(self, session_update: str, update: dict[str, Any]) -> None:
         self._emit(

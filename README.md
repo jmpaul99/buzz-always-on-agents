@@ -39,7 +39,7 @@ Do not open `0.0.0.0/0:22`. The listener control API binds `0.0.0.0:8743`, but t
 3. Listener posts 👀 then 💬 reactions and a typing heartbeat (kind 20002 every 3s).
 4. It POSTs `{agent_name, prompt, recipe, env}` to `GOOSE_WORKER_URL/run` with a Google identity token. One in-flight turn per agent on the listener; Cloud Run concurrency 16 lets every tagged agent enqueue instead of 429.
 5. Worker isolates Goose under `/tmp/goose-<agent>` (`HOME`), runs the `reply` recipe (or a task-MCP recipe), and streams observer events (kind 24200) so Desktop Agent Activity can show thoughts/tools.
-6. Goose replies with `buzz messages send`, replacing `<your-reply>` in the send command. If other agents were mentioned too, it still replies as itself this turn (does not wait, does not speak for them). Listener sees the agent's own chat event, retracts the reactions, and stops typing.
+6. Goose replies with `buzz messages send --content -`, piping the body on stdin (quoted heredoc). If other agents were mentioned too, it still replies as itself this turn (does not wait, does not speak for them). Listener sees the agent's own chat event, retracts the reactions, and stops typing.
 
 Schedules are ordinary Buzz YAML `on: schedule` posts that `@` an agent. The listener treats them like any other mention.
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "goose-job"))
 
-from activity import GooseActivityParser
+from activity import GooseActivityParser, MAX_THOUGHT
 
 
 def collect(feed: str):
@@ -38,7 +38,7 @@ class GooseActivityParserTest(unittest.TestCase):
     def test_tui_shell_and_send(self):
         events, replied = collect(
             "thinking about it\n"
-            "▸ shell\ncommand: buzz messages send --channel x hello\n"
+            "▸ shell\ncommand: buzz messages send --channel x --content -\n"
             '{"accepted":true,"id":"e1"}\n'
         )
         calls = tools(events)
@@ -74,7 +74,7 @@ class GooseActivityParserTest(unittest.TestCase):
                             "value": {
                                 "name": "developer__shell",
                                 "arguments": {
-                                    "command": "buzz messages send --channel x hello"
+                                    "command": "buzz messages send --channel x --content -"
                                 },
                             },
                         },
@@ -380,7 +380,7 @@ class GooseActivityParserTest(unittest.TestCase):
             on_reply=lambda: replied.append(1),
         )
         parser.record_external_send(
-            "buzz messages send --channel x --content '<your-reply>'",
+            "buzz messages send --channel x --content -",
             '{"accepted":true,"id":"e1"}',
             ok=True,
         )
@@ -401,6 +401,26 @@ class GooseActivityParserTest(unittest.TestCase):
             if isinstance(e, dict) and e.get("sessionUpdate") == "agent_thought_chunk"
         ]
         self.assertEqual(thoughts, ["I'll send a short reply."])
+
+    def test_long_thought_is_emitted_in_full_chunks(self):
+        prefix = (
+            "Yes, I can see the chat history from the conversation context. "
+            "Here is what happened so far: "
+        )
+        tail = 'You said it "Didnt seem to take" and I asked for clarification.'
+        text = prefix + ("x" * 700) + " " + tail
+        self.assertGreater(len(text), 800)
+        events, _ = collect(text + "\n")
+        thoughts = [
+            e.get("content", {}).get("text")
+            for e in events
+            if isinstance(e, dict) and e.get("sessionUpdate") == "agent_thought_chunk"
+        ]
+        joined = "".join(thoughts)
+        self.assertEqual(joined, text)
+        self.assertGreater(len(thoughts), 1)
+        self.assertIn('"Didnt seem to take"', joined)
+        self.assertTrue(all(len(chunk) <= MAX_THOUGHT for chunk in thoughts))
 
     def test_help_command_is_visible(self):
         events, _ = collect(
@@ -424,11 +444,11 @@ class GooseActivityParserTest(unittest.TestCase):
             on_second_send=lambda: seconds.append(True),
         )
         parser.feed(
-            "▸ shell\ncommand: buzz messages send --channel x hello\n"
+            "▸ shell\ncommand: buzz messages send --channel x --content -\n"
             '{"accepted":true,"id":"e1"}\n'
         )
         parser.feed(
-            "▸ shell\ncommand: buzz messages send --channel x again\n"
+            "▸ shell\ncommand: buzz messages send --channel x --content -\n"
             '{"accepted":true,"id":"e2"}\n'
         )
         parser.close()
@@ -437,10 +457,27 @@ class GooseActivityParserTest(unittest.TestCase):
 
     def test_messages_send_still_marks_replied(self):
         _events, replied = collect(
-            "▸ shell\ncommand: buzz messages send --channel x hello\n"
+            "▸ shell\ncommand: buzz messages send --channel x --content -\n"
             '{"accepted":true,"id":"e1"}\n'
         )
         self.assertTrue(replied)
+
+    def test_argv_content_does_not_mark_replied(self):
+        _, quoted = collect(
+            "▸ shell\ncommand: buzz messages send --channel x --content \"hello\"\n"
+            '{"accepted":true,"id":"e1"}\n'
+        )
+        self.assertFalse(quoted)
+        _, truncated = collect(
+            "▸ shell\ncommand: buzz messages send --channel x --content \"? C\n"
+            '{"accepted":true,"id":"e1"}\n'
+        )
+        self.assertFalse(truncated)
+        _, positional = collect(
+            "▸ shell\ncommand: buzz messages send --channel x hello\n"
+            '{"accepted":true,"id":"e1"}\n'
+        )
+        self.assertFalse(positional)
 
 
 if __name__ == "__main__":
