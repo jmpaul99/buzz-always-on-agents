@@ -6,7 +6,7 @@ Stay within **5 enabled extensions and ~50 tools**. Extra MCPs eat the context w
 
 ## Always-on vs task MCPs
 
-Always-on (3 in the generated recipe; todo is omitted so Goose cannot add a second LLM turn after send):
+Always-on in `config.yaml` (`enabled: true`): `developer`, Extension Manager, `tom`. Generated recipes bake **`developer` and `tom` only** (`todo` is in `ALWAYS_ON` but skipped so Goose cannot add a second LLM turn after send). Extension Manager stays available from config so Goose can still `manage_extensions` on the generic path.
 
 | Config name | Goose name | Role |
 | --- | --- | --- |
@@ -34,6 +34,8 @@ Intentionally **off** in cloud:
 Provider: `litellm` / model `goose` / `LITELLM_HOST=http://127.0.0.1:4000`. Telemetry off. Thinking effort `low` (so Agent Activity gets reasoning). Mode `auto`. Keyring disabled. `GOOSE_CLI_SHOW_THINKING=1`.
 
 Generic mentions use the generated `reply` recipe (`instructions` = send contract + Buzz CLI table, `prompt` = `{{ message }}`, `settings.max_turns: 25`). Task-MCP recipes share that contract and add one extra extension. Do not use `goose run -t` on the mention path.
+
+The send contract: post with `{{ send_cmd }}` (`buzz messages send --channel … --content '<your-reply>'`, plus `--reply-to` when the mention has an `e` tag). Replace `<your-reply>` with the actual text; never send that placeholder, `...`, or an empty message. If other agents are also `#p`-tagged, still reply as yourself this turn — do not wait for them and do not speak for them. The listener also puts that turn hint on recipe `identity` (`agentutil.with_turn_hint`), because the recipe path only sees identity + mention body.
 
 Goose is a Buzz CLI power user (`buzz --help` allowed): `mem`, `canvas`, `channels`, `dms`, `users`, `huddle`, `messages get/thread/search`, `agents draft-create` / `draft-update` (do not claim the agent exists until the owner saves in Desktop), plus the rest. Post user-visible updates with `buzz messages send`. Stop when the work is finished.
 
@@ -103,7 +105,7 @@ Do not hand-write task recipes unless you are debugging generation. The default 
 
 ## `.goosehints`
 
-Short standing instructions: GCS workspace at `/mnt/buzz` (`agents/`, `channels/`, `shared/`); reply with `buzz messages send`; full Buzz CLI including `--help`; Playwright is for public pages, not Google login; reactions go through `buzz reactions` on the mention event.
+Short standing instructions: GCS workspace at `/mnt/buzz` (`agents/`, `channels/`, `shared/`); reply with `buzz messages send` (replace `<your-reply>`; never send `...` or an empty message); if other agents are mentioned, still reply as yourself this turn; full Buzz CLI including `--help`; Playwright is for public pages, not Google login; reactions go through `buzz reactions` on the mention event.
 
 ## Guardrails (Top of Mind)
 

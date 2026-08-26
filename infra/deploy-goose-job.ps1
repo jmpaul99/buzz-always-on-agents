@@ -94,7 +94,7 @@ if ([string]::IsNullOrWhiteSpace($bucket)) {
 
 $listenerEmail = "$($C.LISTENER_SA)@$Project.iam.gserviceaccount.com"
 $svc = $C.GOOSE_SERVICE
-Write-Host "deploying Cloud Run service $svc (min 0; one instance so per-agent queues work; GCS $bucket at /mnt/buzz)"
+Write-Host "deploying Cloud Run service $svc (min 0; one instance so per-agent queues work; concurrency 16 so multi-mention /run POSTs enqueue; GCS $bucket at /mnt/buzz)"
 $help = & gcloud run deploy --help 2>&1 | Out-String
 if ($help -match "--add-volume") {
     Invoke-Gcloud run deploy $svc `
@@ -106,7 +106,7 @@ if ($help -match "--add-volume") {
         --memory 4Gi `
         --min-instances 0 `
         --max-instances 1 `
-        --concurrency 2 `
+        --concurrency 16 `
         --timeout 3600 `
         --cpu-boost `
         --no-allow-unauthenticated `
@@ -127,7 +127,7 @@ if ($help -match "--add-volume") {
         --memory 4Gi `
         --min-instances 0 `
         --max-instances 1 `
-        --concurrency 2 `
+        --concurrency 16 `
         --timeout 3600 `
         --cpu-boost `
         --no-allow-unauthenticated `

@@ -50,6 +50,8 @@ class RecipeGenerateTest(unittest.TestCase):
             self.assertIn("buzz messages send", reply)
             self.assertIn("text-only assistant answer is not delivered", reply)
             self.assertIn("Stop when the work is finished", reply)
+            self.assertIn("still reply as yourself this turn", reply)
+            self.assertIn("<your-reply>", reply)
             self.assertNotIn("exactly one channel reply", reply)
             self.assertNotIn("A second buzz messages send", reply)
             self.assertIn("Do the requested work", reply)

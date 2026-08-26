@@ -104,7 +104,7 @@ class RecipeParamTest(unittest.TestCase):
                 "BUZZ_MESSAGE": "Test guy",
                 "BUZZ_CHANNEL_ID": "chan-1",
                 "BUZZ_IDENTITY": "You are Health.",
-                "BUZZ_SEND_CMD": "buzz messages send --channel chan-1 --content '...'",
+                "BUZZ_SEND_CMD": "buzz messages send --channel chan-1 --content '<your-reply>'",
                 "BUZZ_AUTHOR_PUBKEY": "ab",
                 "BUZZ_EVENT_ID": "e1",
             },
@@ -112,9 +112,15 @@ class RecipeParamTest(unittest.TestCase):
         )
         self.assertEqual(params["message"], "Test guy")
         self.assertIn("messages send", params["send_cmd"])
+        self.assertIn("<your-reply>", params["send_cmd"])
         self.assertNotIn("channel", params)
         self.assertNotIn("author", params)
         self.assertNotIn("event_id", params)
+
+    def test_default_send_cmd_uses_placeholder(self):
+        params = recipe_params({"BUZZ_CHANNEL_ID": "chan-1", "BUZZ_MESSAGE": "hi"})
+        self.assertIn("<your-reply>", params["send_cmd"])
+        self.assertNotIn("'...'", params["send_cmd"])
 
     def test_recipe_argv_stays_single_line(self):
         with tempfile.TemporaryDirectory() as raw:

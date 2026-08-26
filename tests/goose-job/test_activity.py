@@ -380,7 +380,7 @@ class GooseActivityParserTest(unittest.TestCase):
             on_reply=lambda: replied.append(1),
         )
         parser.record_external_send(
-            "buzz messages send --channel x --content '...'",
+            "buzz messages send --channel x --content '<your-reply>'",
             '{"accepted":true,"id":"e1"}',
             ok=True,
         )

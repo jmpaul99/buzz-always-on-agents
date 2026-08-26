@@ -181,7 +181,7 @@ def _fallback_send(env: dict[str, str], parser: GooseActivityParser) -> bool:
     log.info("fallback send agent=%s chars=%s", env.get("AGENT_NAME") or "-", len(text))
     code, output = _channel_send(env, text)
     channel = (env.get("BUZZ_CHANNEL_ID") or "").strip()
-    command = f"buzz messages send --channel {channel} --content '...'"
+    command = f"buzz messages send --channel {channel} --content '<your-reply>'"
     if (env.get("REPLY_TO") or "").strip():
         command += f" --reply-to {env['REPLY_TO'].strip()}"
     parser.record_external_send(command, output, ok=code == 0)
@@ -209,14 +209,14 @@ def recipe_params(env: dict[str, str], prompt: str = "") -> dict[str, str]:
     reply_to = (env.get("REPLY_TO") or "").strip()
     send_cmd = (env.get("BUZZ_SEND_CMD") or "").strip()
     if not send_cmd and channel:
-        send_cmd = f"buzz messages send --channel {channel} --content '...'"
+        send_cmd = f"buzz messages send --channel {channel} --content '<your-reply>'"
         if reply_to:
             send_cmd += f" --reply-to {reply_to}"
     message = (env.get("BUZZ_MESSAGE") or prompt or "").strip()
     return {
         "identity": (env.get("BUZZ_IDENTITY") or "").strip() or "You are a Buzz cloud agent.",
         "message": message,
-        "send_cmd": send_cmd or "buzz messages send --content '...'",
+        "send_cmd": send_cmd or "buzz messages send --content '<your-reply>'",
     }
 
 
@@ -244,7 +244,7 @@ def build_goose_cmd(
         cmd.extend(["--recipe", str(recipe_file)])
         values = dict(params or {})
         values.setdefault("message", prompt)
-        values.setdefault("send_cmd", "buzz messages send --content '...'")
+        values.setdefault("send_cmd", "buzz messages send --content '<your-reply>'")
         for key in ("identity", "message", "send_cmd"):
             val = values.get(key)
             if val is None:

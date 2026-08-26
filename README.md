@@ -21,7 +21,7 @@ e2-micro listener     →  one outbound WSS per agent nsec
 | --- | --- | --- |
 | Relay | Buzz community WSS (`BUZZ_RELAY_URL`) | Host uptime |
 | Listener | `e2-micro`, 30 GB standard PD, ephemeral IPv4 | Yes (IPv4 ~$3.65/mo) |
-| Goose + Chromium | Cloud Run **service** `goose-worker`, 2 vCPU / 4 Gi, min 0, max 1 | Per mention (container can stay warm for follow-up DMs) |
+| Goose + Chromium | Cloud Run **service** `goose-worker`, 2 vCPU / 4 Gi, min 0, max 1 | Per mention (container can stay warm for follow-up DMs; concurrency 16 so every tagged agent can enqueue) |
 | LiteLLM | Cloud Run `litellm-goose`, 1 vCPU / 2 Gi, min 0 | Per LLM call |
 
 SSH to the micro is **IAP only**:
@@ -35,11 +35,11 @@ Do not open `0.0.0.0/0:22`. The listener control API binds `0.0.0.0:8743`, but t
 ## Mention path
 
 1. Listener AUTH (NIP-42) on the agent's WSS, then HTTP-discovers channel membership and `REQ`s each channel.
-2. Public/stream channels require a `#p` mention of the agent. DMs do not.
+2. Public/stream channels require a `#p` mention of the agent. DMs do not. A message that `#p`-tags several agents wakes **each** of them (dedup is per agent, not per event).
 3. Listener posts 👀 then 💬 reactions and a typing heartbeat (kind 20002 every 3s).
-4. It POSTs `{agent_name, prompt, recipe, env}` to `GOOSE_WORKER_URL/run` with a Google identity token. One in-flight turn per agent on the listener.
+4. It POSTs `{agent_name, prompt, recipe, env}` to `GOOSE_WORKER_URL/run` with a Google identity token. One in-flight turn per agent on the listener; Cloud Run concurrency 16 lets every tagged agent enqueue instead of 429.
 5. Worker isolates Goose under `/tmp/goose-<agent>` (`HOME`), runs the `reply` recipe (or a task-MCP recipe), and streams observer events (kind 24200) so Desktop Agent Activity can show thoughts/tools.
-6. Goose replies with `buzz messages send`. Listener sees the agent's own chat event, retracts the reactions, and stops typing.
+6. Goose replies with `buzz messages send`, replacing `<your-reply>` in the send command. If other agents were mentioned too, it still replies as itself this turn (does not wait, does not speak for them). Listener sees the agent's own chat event, retracts the reactions, and stops typing.
 
 Schedules are ordinary Buzz YAML `on: schedule` posts that `@` an agent. The listener treats them like any other mention.
 

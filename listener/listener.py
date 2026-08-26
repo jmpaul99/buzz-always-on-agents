@@ -37,6 +37,7 @@ from nostrutil import (
     relay_http_base,
     sign_event,
 )
+from seen import SeenStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("buzz-listener")
@@ -48,7 +49,6 @@ GOOSE_WORKER_URL = os.environ.get("GOOSE_WORKER_URL", "").rstrip("/")
 GOOSE_WORKER_TIMEOUT = int(os.environ.get("GOOSE_WORKER_TIMEOUT", "1620"))
 CONTROL_HOST = os.environ.get("BUZZ_CONTROL_HOST", "0.0.0.0")
 CONTROL_PORT = int(os.environ.get("BUZZ_CONTROL_PORT", "8743"))
-SEEN_MAX = 4000
 CHAT_KINDS = au.CHAT_KINDS
 MEMBER_KIND = au.MEMBER_KIND
 META_KIND = au.META_KIND
@@ -93,50 +93,21 @@ def load_agents() -> list[dict[str, Any]]:
     return agents
 
 
-class SeenStore:
-    def __init__(self, path: pathlib.Path) -> None:
-        self.path = path
-        self.ids: list[str] = []
-        self._set: set[str] = set()
-        if path.is_file():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                self.ids = list(data.get("ids") or [])[-SEEN_MAX:]
-                self._set = set(self.ids)
-            except json.JSONDecodeError:
-                pass
-
-    def add(self, event_id: str) -> bool:
-        if event_id in self._set:
-            return False
-        self.ids.append(event_id)
-        self._set.add(event_id)
-        if len(self.ids) > SEEN_MAX:
-            old = self.ids[:-SEEN_MAX]
-            self.ids = self.ids[-SEEN_MAX:]
-            self._set = set(self.ids)
-            del old
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"ids": self.ids}), encoding="utf-8")
-        tmp.replace(self.path)
-        return True
-
-    def has(self, event_id: str) -> bool:
-        return event_id in self._set
-
-
 def execute_job(agent: dict[str, Any], evt: dict[str, Any]) -> None:
     channel = au.channel_from_event(evt)
     event_id = str(evt.get("id") or "")
     content = str(evt.get("content") or "")
     author = str(evt.get("pubkey") or "")
     reply_to = au.tag_value(evt.get("tags") or [], "e") or ""
-    send_cmd = f"buzz messages send --channel {channel} --content '...'"
+    send_cmd = (
+        f"buzz messages send --channel {channel} "
+        f"--content '{au.SEND_CONTENT_PLACEHOLDER}'"
+    )
     if reply_to:
         send_cmd += f" --reply-to {reply_to}"
-    identity = au.load_instructions(AGENTS_DIR, agent["name"]) or (
-        f"You are the Buzz agent {agent['display']} ({agent['name']})."
+    identity = au.with_turn_hint(
+        au.load_instructions(AGENTS_DIR, agent["name"])
+        or f"You are the Buzz agent {agent['display']} ({agent['name']})."
     )
     prompt = au.build_goose_prompt(
         identity=identity,
@@ -569,13 +540,13 @@ async def agent_loop(agent: dict[str, Any], seen: SeenStore) -> None:
                                     )
                                 continue
                             eid = str(evt.get("id") or "")
-                            if not eid or seen.has(eid):
+                            if not eid or seen.has(agent["pubkey"], eid):
                                 continue
                             if (
                                 str(evt.get("pubkey") or "") == agent["pubkey"]
                                 and kind in CHAT_KINDS
                             ):
-                                seen.add(eid)
+                                seen.add(agent["pubkey"], eid)
                                 channel = au.channel_from_event(evt)
                                 job = await tracker.take(channel)
                                 if job:
@@ -587,7 +558,7 @@ async def agent_loop(agent: dict[str, Any], seen: SeenStore) -> None:
                                 continue
                             if not au.should_handle(agent, evt, channels):
                                 continue
-                            seen.add(eid)
+                            seen.add(agent["pubkey"], eid)
                             channel = au.channel_from_event(evt)
                             log.info(
                                 "mention %s kind=%s channel=%s event=%s",

@@ -85,7 +85,7 @@ Cloud Build (`cloudbuild-goose.yaml`, 30 min, `E2_HIGHCPU_8`) → `…/buzz/goos
 
 Then:
 
-- Deploy service `goose-worker` (same image, min 0, max 1, concurrency 2, timeout 3600s, cpu-boost, unauthenticated off)
+- Deploy service `goose-worker` (same image, min 0, max 1, concurrency 16, timeout 3600s, cpu-boost, unauthenticated off)
 - `roles/run.invoker` on `goose-worker` for the **listener** SA
 
 Optional secrets are attached only if they exist (`github-pat`, `tavily-api-key`, `stripe-api-key`, `gcloud-adc` → `/secrets/adc.json`).
@@ -96,7 +96,7 @@ Env on the service includes `LITELLM_URL`, `LITELLM_AUDIENCE`, `GOOSE_MAX_PARALL
 
 - Creates `e2-micro` `buzz-listener` if missing: Ubuntu 24.04, 30 GB pd-standard, PREMIUM IPv4, listener SA, tag `iap-ssh`, OS Login metadata off (SSH via IAP + project keys)
 - Ensures `allow-iap-8743`
-- `gcloud compute scp --tunnel-through-iap` of listener sources
+- `gcloud compute scp --tunnel-through-iap` of listener sources (including `seen.py`)
 - Remote install: venv, pip, systemd units, keepalive timer
 - systemd drop-in `/etc/systemd/system/buzz-listener.service.d/worker.conf` with `GOOSE_WORKER_URL` from `goose-worker`
 - Listener is enabled but not started until `/etc/buzz/*.env` exists

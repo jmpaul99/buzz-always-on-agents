@@ -29,6 +29,25 @@ PUBKEY_RE = re.compile(r"^[0-9a-f]{64}$")
 OWNER_MODES = {"owner-only", "owner"}
 ALLOWLIST_MODES = {"allowlist"}
 SKIP_COMMANDS = {"!shutdown", "!cancel", "!rotate"}
+SEND_CONTENT_PLACEHOLDER = "<your-reply>"
+TURN_HINT = (
+    "If other agents are mentioned too, still reply as yourself this turn; "
+    "do not wait for them and do not speak for them. "
+    f"Replace {SEND_CONTENT_PLACEHOLDER} in the send command with your real reply; "
+    "never send that placeholder, '...', or an empty message."
+)
+
+
+def with_turn_hint(identity: str) -> str:
+    """Recipe path only sees identity + mention body; keep the send contract there."""
+    text = (identity or "").strip()
+    if TURN_HINT in text:
+        return text[:8000]
+    budget = max(0, 8000 - len(TURN_HINT) - 2)
+    text = text[:budget] or "You are a Buzz cloud agent."
+    return f"{text}\n\n{TURN_HINT}"
+
+
 LOCAL_RUNTIME_FIELDS = {
     "is_active",
     "runtime_pid",
@@ -517,6 +536,10 @@ def build_goose_prompt(
         "(including Playwright for public web pages if needed). "
         "Put the full user-visible answer in one channel reply — every part of a multi-ask. "
         f"Send with: {send_cmd}\n"
+        f"Replace {SEND_CONTENT_PLACEHOLDER} with your real reply; never send that "
+        "placeholder, '...', or an empty message. "
+        "Other agents may also be mentioned. Always reply as yourself in this turn; "
+        "do not wait for them and do not speak for them. "
         "A text-only answer is not delivered. You must run that send command before you stop. "
         "Do not add --reply-to unless it is already in that command. "
         "If the user asked to react, run buzz reactions on this mention's Event id "

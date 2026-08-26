@@ -39,6 +39,7 @@ $tmp = "/tmp/buzz-listener-src"
 Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap `
     (Join-Path $listenerDir "listener.py") `
     (Join-Path $listenerDir "agentutil.py") `
+    (Join-Path $listenerDir "seen.py") `
     (Join-Path $listenerDir "taskmcp.py") `
     (Join-Path $listenerDir "task-mcps.json") `
     (Join-Path $listenerDir "nostrutil.py") `

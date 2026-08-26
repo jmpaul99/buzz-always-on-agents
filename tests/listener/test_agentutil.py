@@ -505,7 +505,7 @@ class GoosePromptTests(unittest.TestCase):
             author=OWNER,
             event_id="e1",
             content="Write a poem and list my repos.",
-            send_cmd="buzz messages send --channel chan-1 --content '...'",
+            send_cmd="buzz messages send --channel chan-1 --content '<your-reply>'",
         )
 
     def test_drops_extension_budget_essay(self):
@@ -522,6 +522,20 @@ class GoosePromptTests(unittest.TestCase):
         self.assertIn("every part of a multi-ask", low)
         self.assertIn("text-only answer is not delivered", low)
         self.assertNotIn("after a successful send, stop", low)
+
+    def test_multi_mention_must_reply_as_self(self):
+        low = self.prompt.lower()
+        self.assertIn("other agents may also be mentioned", low)
+        self.assertIn("always reply as yourself", low)
+        self.assertIn("<your-reply>", low)
+        self.assertIn("never send that placeholder", low)
+
+    def test_turn_hint_is_on_identity_for_recipe_path(self):
+        hinted = au.with_turn_hint("You are Fizz.")
+        self.assertIn("You are Fizz.", hinted)
+        self.assertIn(au.TURN_HINT, hinted)
+        self.assertEqual(au.with_turn_hint(hinted), hinted)
+        self.assertLessEqual(len(hinted), 8000)
 
 
 class TeamInstructionsTest(unittest.TestCase):

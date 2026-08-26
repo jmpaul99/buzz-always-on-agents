@@ -12,10 +12,10 @@ Installed to `/opt/buzz-listener` by [`infra/deploy-listener.ps1`](../infra/depl
 4. Stream/private channels filter `#p` to the agent pubkey (mentions). DMs subscribe without `#p`.
 5. Live join/leave: kinds 44100 / 44101 / 39002 add or CLOSE channel subs without reconnecting.
 6. Matching events get 👀 + 💬 reactions and a typing heartbeat (kind 20002, every 3s).
-7. `POST {GOOSE_WORKER_URL}/run` with a metadata-server identity token. One in-flight worker call per agent (`threading.Lock`).
+7. `POST {GOOSE_WORKER_URL}/run` with a metadata-server identity token. One in-flight worker call per agent (`threading.Lock`). A multi-`#p` mention POSTs once per tagged agent; Cloud Run concurrency 16 lets those land in the worker queue.
 8. When the agent’s own chat event arrives (or the worker returns), reactions are deleted (kind 5) and typing stops.
 
-Dedup is `/var/lib/buzz-listener/seen.json` (last 4000 event ids). Presence kind 20001 (`online`) is published after AUTH.
+Dedup is `/var/lib/buzz-listener/seen.json` (last 4000 `{agent_pubkey}:{event_id}` keys). The same mention can still wake every agent who was `#p`-tagged. Presence kind 20001 (`online`) is published after AUTH.
 
 ## Mention rules (`agentutil.should_handle`)
 
@@ -76,7 +76,7 @@ Requires `GOOSE_WORKER_URL` (set by deploy as a systemd drop-in). Timeout defaul
 
 Recipe: `taskmcp.match_task_recipe` against `task-mcps.json`. A recipe is sent only when **exactly one** catalog slug’s keywords appear in the mention. Ambiguous or no hit → generic Goose prompt (Extension Manager can still enable MCPs).
 
-The prompt tells Goose to `buzz messages send --channel …` (and `--reply-to` when the mention has an `e` tag). Prompt cap 20 000 chars; message body 8 000. `BUZZ_TEAM_INSTRUCTIONS` is passed from `/etc/buzz/<slug>.team` when present.
+The prompt and `BUZZ_SEND_CMD` tell Goose to `buzz messages send --channel … --content '<your-reply>'` (and `--reply-to` when the mention has an `e` tag). Replace `<your-reply>` with the real reply; never send that placeholder, `...`, or an empty message. Recipe `identity` also gets `agentutil.with_turn_hint` so a multi-mention still replies as this agent (do not wait, do not speak for others). Prompt cap 20 000 chars; message body 8 000. `BUZZ_TEAM_INSTRUCTIONS` is passed from `/etc/buzz/<slug>.team` when present.
 
 ## systemd
 
@@ -99,7 +99,8 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 | File | Role |
 | --- | --- |
 | `listener.py` | WSS loops, reactions/typing, worker POST, control API |
-| `agentutil.py` | Env records, permissions, membership, Goose prompt, Desktop merge helpers |
+| `seen.py` | Per-agent mention dedup (`seen.json`) |
+| `agentutil.py` | Env records, permissions, membership, Goose prompt, `with_turn_hint`, Desktop merge helpers |
 | `nostrutil.py` | nsec decode, schnorr sign, NIP-42 AUTH, NIP-98 HTTP auth |
 | `taskmcp.py` | Parse `goose/config.yaml` extensions, keyword catalog, recipe match |
 | `task-mcps.json` | Committed keyword catalog. Regenerate with `python goose/generate_recipes.py goose/config.yaml <recipes-dir> listener/task-mcps.json` when adding an MCP, then redeploy the listener. |
@@ -126,4 +127,4 @@ From the repo root:
 python -m unittest discover -s tests/listener
 ```
 
-No GCP. `test_agentutil.py` covers mention filters, reactions, membership, Desktop compact/merge, and multi-Desktop roster import/delete. `test_taskmcp.py` covers config parse, recipe generation, and keyword routing.
+No GCP. `test_agentutil.py` covers mention filters, reactions, membership, Desktop compact/merge, and multi-Desktop roster import/delete. `test_seen.py` covers per-agent mention dedup (one event must still wake every mentioned agent). `test_taskmcp.py` covers config parse, recipe generation, and keyword routing.

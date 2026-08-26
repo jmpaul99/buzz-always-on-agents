@@ -2,7 +2,7 @@
 
 Playwright + Goose + sprig (`buzz`) image for Cloud Run **service** `goose-worker`. The listener `POST`s `/run`; `entrypoint.sh` starts the LiteLLM sidecar then `worker.py`.
 
-The HTTP worker stays up so a follow-up DM can reuse the container (min instances 0, max 1, concurrency 2).
+The HTTP worker stays up so a follow-up DM can reuse the container (min instances 0, max 1, concurrency 16).
 
 Image: `linux/amd64` only (`mcr.microsoft.com/playwright:v1.55.1-noble`). Built by [`infra/cloudbuild-goose.yaml`](../infra/cloudbuild-goose.yaml) from the repo root (`-f goose-job/Dockerfile`).
 
@@ -46,8 +46,9 @@ POST JSON:
     "BUZZ_AUTHOR_PUBKEY": "…",
     "BUZZ_MESSAGE": "…",
     "BUZZ_IDENTITY": "…",
-    "BUZZ_SEND_CMD": "…",
+    "BUZZ_SEND_CMD": "buzz messages send --channel … --content '<your-reply>'",
     "BUZZ_TEAM_INSTRUCTIONS": "…",
+    "BUZZ_WORKSPACE": "/mnt/buzz",
     "GOOSE_RECIPE": "playwright"
   }
 }
@@ -59,6 +60,7 @@ Only the `PASS_ENV` keys are copied. Prompt cap 20 000. Payload cap 512 KiB. R
 
 - At most `GOOSE_MAX_PARALLEL` (default 2) Goose processes.
 - **One turn at a time per agent.** Extra mentions for the same agent queue FIFO. Other agents can run in parallel.
+- Cloud Run concurrency is 16 so a multi-mention can POST `/run` for every tagged agent; extras wait in the worker queue, not at Cloud Run's 429 boundary.
 - Relay URLs are rewritten `wss://` → `https://` for `buzz` HTTP.
 
 Isolation: each agent gets `/tmp/goose-<slug>` with its own `HOME`, `XDG_CONFIG_HOME`, and npm cache. `agenthome.sync_agent_home` copies config, `.goosehints`, `guardrails.md`, and gcloud ADC into that HOME. The worker then writes `tom.md` (guardrails plus standing sections from `buzz mem` / canvas / huddle / thread / team / workspace) and points `GOOSE_MOIM_MESSAGE_FILE` at it. cwd is `/mnt/buzz/agents/<slug>` when the GCS volume is mounted; HOME stays under `/tmp`. Channel work goes in `/mnt/buzz/channels/<id>/` (created on the first turn in that huddle). `shared/` is for files every agent in every channel should see.
@@ -78,8 +80,10 @@ Activity is Goose stdout **or** LiteLLM sidecar `/activity` (`in_flight > 0`). L
 
 `build_goose_cmd`:
 
-- If `GOOSE_RECIPE` matches `/home/goose/recipes/<slug>/recipe.yaml`, run `goose run --recipe … --params message=…` (task MCP already enabled in that recipe).
+- If `GOOSE_RECIPE` matches `/home/goose/recipes/<slug>/recipe.yaml`, run `goose run --recipe … --params identity=… message=… send_cmd=…` (task MCP already enabled in that recipe).
 - Else the generated `reply` recipe (always-on extensions + send-required instructions). `-t` is only a last resort if that file is missing.
+
+`recipe_params` builds `send_cmd` as `buzz messages send --channel … --content '<your-reply>'` (plus `--reply-to` when set). Goose must replace `<your-reply>`; it must not send that placeholder, `...`, or an empty message. `BUZZ_IDENTITY` already includes the listener turn hint (multi-mention: reply as yourself this turn).
 
 Always `--no-session --quiet --output-format stream-json`. Quiet drops recipe-load TUI; stream-json still carries thoughts/tools. Goose is attached to a PTY so JSON is not block-buffered (a pipe left `json=0 bytes=0` until exit, which is why activity arrived after the channel reply and Goose sent twice). The worker does **not** stop on the first or second channel send. It waits until Goose exits, idle-timeouts (no LLM/tools/parser activity), or `GOOSE_TIMEOUT_SECS`. `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low`.
 
@@ -117,7 +121,7 @@ Goose’s LiteLLM client is non-streaming: it POSTs and waits for one JSON body.
 
 ## Deploy knobs
 
-Set in [`infra/deploy-goose-job.ps1`](../infra/deploy-goose-job.ps1): 2 vCPU / 4 Gi, min 0, max 1, concurrency 2, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`. GCS workspace bucket mounted at `/mnt/buzz`. Secrets: LiteLLM master, Gemini/Groq/NIM, optional GitHub/Tavily/Stripe, optional ADC JSON at `/secrets/adc.json`.
+Set in [`infra/deploy-goose-job.ps1`](../infra/deploy-goose-job.ps1): 2 vCPU / 4 Gi, min 0, max 1, concurrency 16, `--cpu-boost`, `--no-allow-unauthenticated`, `--ingress all`. GCS workspace bucket mounted at `/mnt/buzz`. Secrets: LiteLLM master, Gemini/Groq/NIM, optional GitHub/Tavily/Stripe, optional ADC JSON at `/secrets/adc.json`.
 
 ## Tests
 
