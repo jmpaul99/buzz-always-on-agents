@@ -50,5 +50,28 @@ active_provider: litellm
         self.assertNotIn("developer", keys)
 
 
+class RouterTargetsTest(unittest.TestCase):
+    def setUp(self):
+        self.cfg = (ROOT / "litellm" / "config.yaml").read_text(encoding="utf-8")
+
+    def test_groq_fast_is_120b(self):
+        self.assertIn("groq/openai/gpt-oss-120b", self.cfg)
+        self.assertIn("groq/openai/gpt-oss-20b", self.cfg)
+        self.assertRegex(self.cfg, r"model_name: groq-fast\n(?:.*\n){1,4}.*gpt-oss-120b")
+
+    def test_simple_prefers_tool_capable(self):
+        self.assertIn("SIMPLE: [groq-fast, groq-qwen, gemini-flash]", self.cfg)
+        self.assertIn("MEDIUM: [groq-qwen, gemini-flash, nemotron, deepseek-flash]", self.cfg)
+        self.assertNotIn("SIMPLE: [groq-fast, deepseek-flash, gemini-lite]", self.cfg)
+        self.assertIn("default_model: groq-fast", self.cfg)
+
+    def test_weak_models_are_fallback_only(self):
+        simple = next(line for line in self.cfg.splitlines() if "SIMPLE:" in line)
+        self.assertNotIn("gemini-lite", simple)
+        self.assertNotIn("groq-20b", simple)
+        self.assertIn("- gemini-lite", self.cfg)
+        self.assertIn("- groq-20b", self.cfg)
+
+
 if __name__ == "__main__":
     unittest.main()

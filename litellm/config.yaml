@@ -40,9 +40,10 @@ model_list:
       id: step-flash
 
   # --- Groq (own org limits) ---
+  # 120B is the greeting/default: 20B skips buzz messages send.
   - model_name: groq-fast
     litellm_params:
-      model: groq/openai/gpt-oss-20b
+      model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
       rpm: 30
     model_info:
@@ -54,6 +55,13 @@ model_list:
       rpm: 30
     model_info:
       id: groq-qwen
+  - model_name: groq-20b
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_API_KEY
+      rpm: 30
+    model_info:
+      id: groq-20b
 
   # --- Gemini (own AI Studio project) ---
   - model_name: gemini-flash
@@ -96,8 +104,8 @@ model_list:
       drop_params: true
       complexity_router_config:
         tiers:
-          SIMPLE: [groq-fast, deepseek-flash, gemini-lite]
-          MEDIUM: [nemotron, deepseek-flash, groq-qwen, gemini-lite]
+          SIMPLE: [groq-fast, groq-qwen, gemini-flash]
+          MEDIUM: [groq-qwen, gemini-flash, nemotron, deepseek-flash]
           COMPLEX: [minimax, laguna, step-flash, gemini-flash]
           REASONING: [step-flash, gemini-flash]
         adaptive: true
@@ -123,8 +131,8 @@ model_list:
         # (merge_extension_keywords.py) so routing stays extension-agnostic.
         custom_technical_keywords:
           [buzz, nostr, nsec, relay, systemd, aarch64, kubernetes, postgres]
-        default_model: nemotron
-      complexity_router_default_model: nemotron
+        default_model: groq-fast
+      complexity_router_default_model: groq-fast
 
 router_settings:
   routing_strategy: simple-shuffle
@@ -139,13 +147,14 @@ router_settings:
   default_fallbacks:
     - groq-fast
     - groq-qwen
-    - deepseek-flash
-    - gemini-lite
-    - nemotron
     - gemini-flash
+    - nemotron
+    - deepseek-flash
     - minimax
     - laguna
     - step-flash
+    - gemini-lite
+    - groq-20b
     - openrouter-free
     - openrouter-cheap
 

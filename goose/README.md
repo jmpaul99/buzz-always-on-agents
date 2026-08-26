@@ -6,17 +6,17 @@ Stay within **5 enabled extensions and ~50 tools**. Extra MCPs eat the context w
 
 ## Always-on vs task MCPs
 
-Always-on (4, so one task MCP still fits in 5):
+Always-on (3 in the generated recipe; todo is omitted so Goose cannot add a second LLM turn after send):
 
 | Config name | Goose name | Role |
 | --- | --- | --- |
 | `developer` | developer | Files + shell (`buzz messages send` lives here) |
 | `extensionmanager` | Extension Manager | Enable/disable the rest |
-| `todo` | todo | Multi-step lists |
 | `tom` | Top of Mind | Injects `guardrails.md` every turn |
 
 Intentionally **off** in cloud:
 
+- `todo` — extra LLM turn after send; duplicates the channel reply
 - `code_execution` (Code Mode) — was emitting shell calls without a `command` field; cloud has no approval UI
 - `scheduler` — Buzz YAML `on: schedule` is the scheduler
 - `skills`, `orchestrator`, `summon`, `chatrecall`, `memory`, Computer Controller, Apps, etc.

@@ -23,12 +23,14 @@ SEND_INSTRUCTIONS = """{{ identity }}
 You are a Buzz cloud agent. The user only sees the Buzz channel.
 
 Always:
-1. Do the requested work if needed.
+1. Do all requested work first (tools, lookups, edits).
 2. Send exactly one channel reply with: {{ send_cmd }}
-3. Stop immediately after that send.
+3. Stop immediately after that send. A later user message is a new turn.
 
 Never:
-- A second buzz messages send or a "message sent" follow-up
+- A status ping or "working on it" send (typing and Agent Activity cover that)
+- A second buzz messages send, confirmation, or repeat of the previous message
+- The todo extension
 - buzz --help or buzz reactions --help
 - buzz reactions unless the user asked to react
 - Narrate channel ids, event ids, or recipe parameters
@@ -139,6 +141,8 @@ def render_recipe(slug: str, spec: dict[str, Any] | None = None) -> str:
         "extensions:",
     ]
     for always in ALWAYS_ON:
+        if str(always.get("name") or "") == "todo":
+            continue
         emit_extension(lines, always, name=str(always["name"]))
     if spec is not None:
         emit_extension(lines, spec, name=slug)

@@ -79,7 +79,7 @@ Activity is Goose stdout **or** LiteLLM sidecar `/activity` (`in_flight > 0`). L
 - If `GOOSE_RECIPE` matches `/home/goose/recipes/<slug>/recipe.yaml`, run `goose run --recipe … --params message=…` (task MCP already enabled in that recipe).
 - Else the generated `reply` recipe (always-on extensions + send-required instructions). `-t` is only a last resort if that file is missing.
 
-Always `--no-session --quiet --output-format stream-json`. Quiet drops recipe-load TUI; stream-json still carries thoughts/tools. `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low`.
+Always `--no-session --quiet --output-format stream-json`. Quiet drops recipe-load TUI; stream-json still carries thoughts/tools. Goose is attached to a PTY so JSON is not block-buffered (a pipe left `json=0 bytes=0` until exit, which is why activity arrived after the channel reply and Goose sent twice). After the first `buzz messages send`, the worker kills Goose in 0.5s so it cannot start another LiteLLM call. `GOOSE_CLI_SHOW_THINKING=1` and `GOOSE_THINKING_EFFORT=low`.
 
 ## Observer (kind 24200)
 

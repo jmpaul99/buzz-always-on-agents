@@ -10,8 +10,8 @@ Goose is configured with `GOOSE_PROVIDER=litellm` and `GOOSE_MODEL=goose`. That 
 
 | Tier | Models (order = preference / shuffle pool) |
 | --- | --- |
-| SIMPLE | `groq-fast`, `deepseek-flash`, `gemini-lite` |
-| MEDIUM | `nemotron`, `deepseek-flash`, `groq-qwen`, `gemini-lite` |
+| SIMPLE | `groq-fast` (gpt-oss-120b), `groq-qwen`, `gemini-flash` |
+| MEDIUM | `groq-qwen`, `gemini-flash`, `nemotron`, `deepseek-flash` |
 | COMPLEX | `minimax`, `laguna`, `step-flash`, `gemini-flash` |
 | REASONING | `step-flash`, `gemini-flash` |
 
@@ -21,7 +21,7 @@ Keyword shortcuts:
 - COMPLEX: `refactor`, `implement`, `debug`, `traceback`, `compile`, `function`
 - REASONING: `step by step`, `reason`, `architecture`, `tradeoff`, `prove`
 
-Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed asks like “write a poem and react” stay MEDIUM. Token threshold `complex: 400`. Adaptive routing + session affinity (1h) are on. Default model: `nemotron`.
+Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed asks like “write a poem and react” stay MEDIUM. Token threshold `complex: 400`. Adaptive routing + session affinity (1h) are on. Default model: `groq-fast` (`gpt-oss-120b`). `gemini-lite` and `groq-20b` are fallback-only — they skip tool calls too often for greetings.
 
 `custom_technical_keywords` starts with Buzz/infra terms (`buzz`, `nostr`, `nsec`, `relay`, …). **Disabled Goose extension names are appended at image build** by `merge_extension_keywords.py` so adding an MCP in `goose/config.yaml` automatically steers those mentions toward COMPLEX without a hand-maintained list.
 
@@ -29,7 +29,7 @@ Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed 
 
 `router_settings.default_fallbacks` after allowed_fails=1 / 30s cooldown / 2 retries:
 
-`groq-fast` → `groq-qwen` → `deepseek-flash` → `gemini-lite` → `nemotron` → `gemini-flash` → `minimax` → `laguna` → `step-flash` → `openrouter-free` → `openrouter-cheap`
+`groq-fast` → `groq-qwen` → `gemini-flash` → `nemotron` → `deepseek-flash` → `minimax` → `laguna` → `step-flash` → `gemini-lite` → `groq-20b` → `openrouter-free` → `openrouter-cheap`
 
 OpenRouter is last-resort only (not in complexity tiers). `openrouter-cheap` uses OpenRouter’s auto-router at `cost_tier: low`.
 

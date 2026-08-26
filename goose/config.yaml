@@ -96,7 +96,7 @@ extensions:
     display_name: Analyze
     bundled: true
   todo:
-    enabled: true
+    enabled: false
     type: platform
     name: todo
     description: Enable a todo list for goose so it can keep track of what it is doing

@@ -30,7 +30,7 @@ log = logging.getLogger("goose-worker")
 PORT = int(os.environ.get("PORT", "8080"))
 GOOSE_TIMEOUT = int(os.environ.get("GOOSE_TIMEOUT_SECS", "1500"))
 GOOSE_IDLE_TIMEOUT = int(os.environ.get("GOOSE_IDLE_TIMEOUT_SECS", "180"))
-REPLY_GRACE_SECS = 5  # stop soon after the first channel send so Goose cannot double-post
+REPLY_STOP_SECS = 0.5  # after the first channel send is parsed, kill before the next LLM call
 LIVENESS_SECS = 10
 SEND_TIMEOUT_SECS = 45
 FALLBACK_REPLY = (
@@ -257,15 +257,27 @@ def _spawn_goose(env: dict[str, str], home: pathlib.Path) -> tuple[subprocess.Po
     env.setdefault("CI", "1")
     env.setdefault("COLUMNS", "512")
     env.setdefault("LINES", "24")
-    proc = subprocess.Popen(
-        cmd,
-        env=env,
-        cwd=str(home),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
+    kw: dict[str, Any] = {
+        "env": env,
+        "cwd": str(home),
+        "stdin": subprocess.DEVNULL,
+        "start_new_session": True,
+    }
+    # A pipe is fully buffered. Goose then runs extra LLM turns after the
+    # channel send, and Agent Activity dumps only when the process exits.
+    if os.name == "posix":
+        import pty
+
+        master, slave = pty.openpty()
+        try:
+            proc = subprocess.Popen(cmd, stdout=slave, stderr=slave, **kw)
+        except Exception:
+            os.close(master)
+            os.close(slave)
+            raise
+        os.close(slave)
+        return proc, master
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kw)
     return proc, proc.stdout
 
 
@@ -326,11 +338,20 @@ def _run_goose(turn: Turn) -> None:
     )
     log.info("goose start agent=%s recipe=%s", turn.agent, env.get("GOOSE_RECIPE") or "-")
     replied = threading.Event()
+    replied_at = 0.0
+
+    def _on_reply() -> None:
+        nonlocal replied_at
+        if not replied.is_set():
+            replied_at = time.monotonic()
+        replied.set()
+
     parser = GooseActivityParser(
         observer.emit,
         on_activity=activity.bump,
-        on_reply=replied.set,
+        on_reply=_on_reply,
     )
+    out: Any = None
     try:
         proc, out = _spawn_goose(env, home)
     except OSError as exc:
@@ -378,10 +399,10 @@ def _run_goose(turn: Turn) -> None:
                 turn.error = "goose timed out"
                 log.error("goose timeout agent=%s", turn.agent)
                 break
-            if replied.is_set() and now - activity.last() > REPLY_GRACE_SECS:
+            if replied.is_set() and now - replied_at >= REPLY_STOP_SECS:
                 _kill_proc(proc)
                 turn.returncode = 0
-                log.info("goose stop after reply idle agent=%s", turn.agent)
+                log.info("goose stop after reply agent=%s", turn.agent)
                 break
             if not replied.is_set() and now - activity.last() > GOOSE_IDLE_TIMEOUT:
                 _kill_proc(proc)
@@ -389,10 +410,18 @@ def _run_goose(turn: Turn) -> None:
                 turn.error = "idle timeout"
                 log.error("goose idle timeout agent=%s", turn.agent)
                 break
-            time.sleep(1)
+            if replied.is_set():
+                time.sleep(min(0.2, max(0.05, REPLY_STOP_SECS - (time.monotonic() - replied_at))))
+            else:
+                time.sleep(0.2)
     finally:
         if proc.poll() is None:
             _kill_proc(proc)
+        if isinstance(out, int):
+            try:
+                os.close(out)
+            except OSError:
+                pass
         reader.join(timeout=2)
         if proc.stdout is not None:
             try:
