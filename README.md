@@ -52,10 +52,10 @@ Agent **identity** (`nsec`) is created in Buzz Desktop. While this computer is o
 | Create / delete (Desktop card ↔ `/etc/buzz/*.env` ↔ other Desktops) | Core + cold memory (`buzz mem`, NIP-AE) | Phone Buzz (no sidecar) |
 | `system_prompt` | Channel canvas (`buzz canvas`) | Card `avatar_url`, `persona_id` |
 | `respond_to` and `respond_to_allowlist` | Huddle instructions (owner-signed, per channel) | Goose `skills` / `orchestrator` / `summon` |
-| `team_id`, team instruction text, display name, `channel_allowlist` | Thread / DM history (`buzz messages thread`) | Desktop/phone FUSE of the GCS workspace |
+| `team_id`, team instruction text, display name, `channel_allowlist` | Thread / DM / channel history (`buzz messages get` or `thread`) | Desktop/phone FUSE of the GCS workspace |
 | Cloud runtime labels on the card (`model=goose`, `provider=litellm`, provider backend) | Channel membership (listener join/leave live) | `is_active` / `runtime_pid` as a stop/start signal (cloud keeps listening) |
 
-Memories, canvas, huddle, and thread are fetched by the Goose worker at turn start (`tom.md`) and read/written through the Buzz CLI. Team instruction text is denormalized onto each cloud agent (`/etc/buzz/<slug>.team`) so a `teams.json` save PUTs every agent on that team.
+Memories, canvas, huddle, and recent channel or thread messages are fetched by the Goose worker at turn start (`tom.md`) and read/written through the Buzz CLI. Team instruction text is denormalized onto each cloud agent (`/etc/buzz/<slug>.team`) so a `teams.json` save PUTs every agent on that team.
 
 **Cloud Goose + LiteLLM are source of truth for model and harness.** The sidecar overwrites Desktop cards for cloud-tracked agents: provider backend, empty local `agent_command` / `acp_command` / `mcp_command`, `model=goose`, `provider=litellm`, `is_active=false`. Those fields are not sent to GCP (the worker is already pinned to `GOOSE_MODEL=goose`). Switching **Run on → this computer** is reverted on the next sidecar cycle. Stopping the card is not undeploy.
 

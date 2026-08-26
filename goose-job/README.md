@@ -63,7 +63,7 @@ Only the `PASS_ENV` keys are copied. Prompt cap 20 000. Payload cap 512 KiB. R
 - Cloud Run concurrency is 16 so a multi-mention can POST `/run` for every tagged agent; extras wait in the worker queue, not at Cloud Run's 429 boundary.
 - Relay URLs are rewritten `wss://` → `https://` for `buzz` HTTP.
 
-Isolation: each agent gets `/tmp/goose-<slug>` with its own `HOME`, `XDG_CONFIG_HOME`, and npm cache. `agenthome.sync_agent_home` copies config, `.goosehints`, `guardrails.md`, and gcloud ADC into that HOME. The worker then writes `tom.md` (guardrails plus standing sections from `buzz mem` / canvas / huddle / thread / team / workspace) and points `GOOSE_MOIM_MESSAGE_FILE` at it. cwd is `/mnt/buzz/agents/<slug>` when the GCS volume is mounted; HOME stays under `/tmp`. Channel work goes in `/mnt/buzz/channels/<id>/` (created on the first turn in that huddle). `shared/` is for files every agent in every channel should see.
+Isolation: each agent gets `/tmp/goose-<slug>` with its own `HOME`, `XDG_CONFIG_HOME`, and npm cache. `agenthome.sync_agent_home` copies config, `.goosehints`, `guardrails.md`, and gcloud ADC into that HOME. The worker then writes `tom.md` (guardrails plus standing sections from `buzz mem` / canvas / huddle / recent channel or thread / team / workspace) and points `GOOSE_MOIM_MESSAGE_FILE` at it. cwd is `/mnt/buzz/agents/<slug>` when the GCS volume is mounted; HOME stays under `/tmp`. Channel work goes in `/mnt/buzz/channels/<id>/` (created on the first turn in that huddle). `shared/` is for files every agent in every channel should see.
 
 ## Timeouts
 
@@ -112,7 +112,7 @@ Goose’s LiteLLM client is non-streaming: it POSTs and waits for one JSON body.
 | `worker.py` | HTTP server, per-agent queues, Goose spawn |
 | `agenthome.py` | Copy config into isolated HOME |
 | `activity.py` | Stdout → observer events + redact (`--help` is shown; env dumps are not) |
-| `memory.py` | `buzz mem get core` plus canvas/huddle/thread/team/workspace → `tom.md` |
+| `memory.py` | `buzz mem get core` plus canvas/huddle/recent channel or thread/team/workspace → `tom.md` |
 | `observer.py` | Kind 24200 WSS publisher |
 | `nip44.py` | NIP-44 v2 encrypt for observer payloads |
 | `litellm_proxy.py` | Localhost → Cloud Run LiteLLM |

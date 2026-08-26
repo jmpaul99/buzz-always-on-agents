@@ -109,4 +109,4 @@ Short standing instructions: GCS workspace at `/mnt/buzz` (`agents/`, `channels/
 
 ## Guardrails (Top of Mind)
 
-[`guardrails.md`](guardrails.md) is copied into every-turn `tom.md` with standing sections (core memory, team instructions, huddle, canvas metadata, thread, workspace). Reminder: 5 extensions / 50 tools, always-on set, enable-then-discover, never invent tool names, never dump env, never enable Code Mode, `buzz mem` only for durable facts.
+[`guardrails.md`](guardrails.md) is copied into every-turn `tom.md` with standing sections (core memory, team instructions, huddle, canvas metadata, recent channel or thread, workspace). Reminder: 5 extensions / 50 tools, always-on set, enable-then-discover, never invent tool names, never dump env, never enable Code Mode, `buzz mem` only for durable facts.

@@ -191,26 +191,92 @@ def fetch_huddle(env: dict[str, str]) -> str:
     return "[Huddle Instructions]\n" + text[:TEAM_CAP]
 
 
+def _parse_message_list(text: str) -> list[dict[str, Any]]:
+    """Parse buzz messages get/thread JSON. Omit on junk rather than inventing lines."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start < 0 or end <= start:
+            return []
+        try:
+            obj = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return []
+    if isinstance(obj, list):
+        return [item for item in obj if isinstance(item, dict)]
+    if isinstance(obj, dict):
+        for key in ("events", "messages", "data"):
+            val = obj.get(key)
+            if isinstance(val, list):
+                return [item for item in val if isinstance(item, dict)]
+        return [obj]
+    return []
+
+
+def _format_context_messages(events: list[dict[str, Any]], skip_id: str) -> str:
+    rows: list[str] = []
+    for ev in events:
+        eid = str(ev.get("id") or "").strip()
+        if skip_id and eid == skip_id:
+            continue
+        content = str(ev.get("content") or "").strip()
+        if not content:
+            continue
+        pubkey = str(ev.get("pubkey") or "").strip()
+        actor = (pubkey[:8] if pubkey else eid[:8]) or "msg"
+        created = ev.get("created_at")
+        ts = str(created) if created not in (None, "") else ""
+        rows.append(f"{actor} ({ts}): {content}" if ts else f"{actor}: {content}")
+    if len(rows) > THREAD_MAX_MESSAGES:
+        rows = rows[-THREAD_MAX_MESSAGES:]
+    return "\n".join(rows)[:THREAD_CAP]
+
+
 def fetch_thread(env: dict[str, str]) -> str:
+    """Short-term chat for this channel: recent get, or thread when the event has an e tag."""
+    channel = (env.get("BUZZ_CHANNEL_ID") or "").strip()
+    if not channel:
+        log.info("thread omitted reason=missing-channel")
+        return ""
     reply_to = (env.get("REPLY_TO") or "").strip()
-    if not reply_to:
-        return ""
-    proc = run_buzz(["messages", "thread", "--event", reply_to], env)
+    skip_id = (env.get("BUZZ_EVENT_ID") or "").strip()
+    limit = str(THREAD_MAX_MESSAGES)
+    if reply_to:
+        kind = "thread"
+        label = "Thread Context"
+        proc = run_buzz(
+            [
+                "messages",
+                "thread",
+                "--channel",
+                channel,
+                "--event",
+                reply_to,
+                "--limit",
+                limit,
+            ],
+            env,
+        )
+    else:
+        kind = "get"
+        label = "Conversation Context"
+        proc = run_buzz(
+            ["messages", "get", "--channel", channel, "--limit", limit],
+            env,
+        )
     if proc.returncode != 0:
-        proc = run_buzz(["messages", "thread", "--id", reply_to], env)
-    if proc.returncode != 0:
-        log.info("thread omitted reason=fetch-error code=%s", proc.returncode)
+        log.info("%s omitted reason=fetch-error code=%s", kind, proc.returncode)
         return ""
-    text = (proc.stdout or "").strip()
-    if not text:
-        return ""
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if len(lines) > THREAD_MAX_MESSAGES:
-        lines = lines[-THREAD_MAX_MESSAGES:]
-    body = "\n".join(lines)[:THREAD_CAP]
+    body = _format_context_messages(_parse_message_list(proc.stdout or ""), skip_id)
     if not body:
+        log.info("%s omitted reason=empty", kind)
         return ""
-    return "[Context]\n" + body
+    return f"[{label}]\n" + body
 
 
 def team_section(env: dict[str, str]) -> str:

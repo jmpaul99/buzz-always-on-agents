@@ -40,9 +40,49 @@ if cmd[:2] == ["huddle", "get"]:
         print("Stay on topic.")
         raise SystemExit(0)
     raise SystemExit(1)
+if cmd[:2] == ["messages", "get"]:
+    if "--channel" not in cmd or "--limit" not in cmd:
+        raise SystemExit(1)
+    if mode == "get":
+        print(
+            json.dumps(
+                [
+                    {"id": "evt-old", "pubkey": "aa" * 32, "content": "update the agent", "created_at": 1},
+                    {"id": "evt-now", "pubkey": "bb" * 32, "content": "Yes", "created_at": 2},
+                ]
+            )
+        )
+        raise SystemExit(0)
+    if mode == "get-empty":
+        print("[]")
+        raise SystemExit(0)
+    if mode == "get-many":
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": f"evt-{i}",
+                        "content": f"line-{i}",
+                        "created_at": i,
+                    }
+                    for i in range(20)
+                ]
+            )
+        )
+        raise SystemExit(0)
+    raise SystemExit(1)
 if cmd[:2] == ["messages", "thread"]:
+    if "--channel" not in cmd or "--event" not in cmd or "--id" in cmd:
+        raise SystemExit(1)
     if mode == "thread":
-        print("alice: hi\nbob: hello")
+        print(
+            json.dumps(
+                [
+                    {"id": "evt-root", "pubkey": "aa" * 32, "content": "alice hi", "created_at": 1},
+                    {"id": "evt-9", "pubkey": "bb" * 32, "content": "bob hello", "created_at": 2},
+                ]
+            )
+        )
         raise SystemExit(0)
     raise SystemExit(1)
 raise SystemExit(1)
@@ -111,8 +151,48 @@ class StandingFetchTest(unittest.TestCase):
             self.assertIn("[Huddle Instructions]", huddle)
             self.assertIn("Stay on topic.", huddle)
             thread = memory.fetch_thread(_env(Path(raw), FAKE_MODE="thread", REPLY_TO="evt-9"))
-            self.assertIn("[Context]", thread)
-            self.assertIn("alice: hi", thread)
+            self.assertIn("[Thread Context]", thread)
+            self.assertIn("alice hi", thread)
+            self.assertIn("bob hello", thread)
+            self.assertNotIn("[Context]", thread)
+
+    def test_unthreaded_get_includes_stream(self):
+        with tempfile.TemporaryDirectory() as raw:
+            env = _env(Path(raw), FAKE_MODE="get", BUZZ_EVENT_ID="evt-now")
+            with self.assertLogs("goose-memory", level="INFO") as cm:
+                logging.getLogger("goose-memory").info("start")
+                section = memory.fetch_thread(env)
+            self.assertIn("[Conversation Context]", section)
+            self.assertIn("update the agent", section)
+            self.assertNotIn("Yes", section)
+            blob = "\n".join(cm.output)
+            self.assertNotIn("update the agent", blob)
+
+    def test_unthreaded_omits_without_channel(self):
+        with tempfile.TemporaryDirectory() as raw:
+            env = _env(Path(raw), FAKE_MODE="get")
+            env["BUZZ_CHANNEL_ID"] = ""
+            self.assertEqual(memory.fetch_thread(env), "")
+
+    def test_get_empty_omits(self):
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertEqual(memory.fetch_thread(_env(Path(raw), FAKE_MODE="get-empty")), "")
+
+    def test_get_caps_at_twelve(self):
+        with tempfile.TemporaryDirectory() as raw:
+            section = memory.fetch_thread(_env(Path(raw), FAKE_MODE="get-many"))
+            self.assertIn("[Conversation Context]", section)
+            self.assertNotIn("line-0", section)
+            self.assertIn("line-19", section)
+            self.assertIn("line-8", section)
+
+    def test_thread_requires_channel_and_event(self):
+        with tempfile.TemporaryDirectory() as raw:
+            section = memory.fetch_thread(
+                _env(Path(raw), FAKE_MODE="thread", REPLY_TO="evt-9")
+            )
+            self.assertIn("[Thread Context]", section)
+            self.assertIn("alice hi", section)
 
     def test_omit_on_cli_error(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -120,6 +200,7 @@ class StandingFetchTest(unittest.TestCase):
             self.assertEqual(memory.fetch_canvas(env), "")
             self.assertEqual(memory.fetch_huddle(env), "")
             self.assertEqual(memory.fetch_thread(env), "")
+            self.assertEqual(memory.fetch_thread(_env(Path(raw), FAKE_MODE="error")), "")
 
     def test_team_section(self):
         self.assertIn("[Team Instructions]", memory.team_section({"BUZZ_TEAM_INSTRUCTIONS": "Be kind."}))
