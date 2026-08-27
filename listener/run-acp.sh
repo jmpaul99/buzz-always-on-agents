@@ -21,6 +21,12 @@ esac
 
 WORKSPACE="${BUZZ_WORKSPACE:-/var/lib/buzz-listener}"
 mkdir -p "${WORKSPACE}/agents/${NAME}"
+SKILL_SRC="/opt/buzz-listener/skills/mcp-manager/SKILL.md"
+SKILL_DST="${WORKSPACE}/agents/${NAME}/.agents/skills/mcp-manager/SKILL.md"
+if [[ -f "${SKILL_SRC}" ]]; then
+  mkdir -p "$(dirname "${SKILL_DST}")"
+  cp "${SKILL_SRC}" "${SKILL_DST}"
+fi
 PROMPT="${WORKSPACE}/agents/${NAME}/system-prompt.txt"
 INST="/etc/buzz/${NAME}.instructions"
 TEAM="/etc/buzz/${NAME}.team"
@@ -39,7 +45,7 @@ fi
 
 export BUZZ_ACP_AGENT_COMMAND="${BUZZ_ACP_AGENT_COMMAND:-buzz-agent}"
 export BUZZ_ACP_AGENT_ARGS="${BUZZ_ACP_AGENT_ARGS:-}"
-export BUZZ_ACP_MCP_COMMAND="${BUZZ_ACP_MCP_COMMAND:-buzz-dev-mcp}"
+export BUZZ_ACP_MCP_COMMAND="${BUZZ_ACP_MCP_COMMAND:-/opt/buzz-listener/run-mcp.sh}"
 export BUZZ_AGENT_PROVIDER="${BUZZ_AGENT_PROVIDER:-openai}"
 export OPENAI_COMPAT_BASE_URL="${OPENAI_COMPAT_BASE_URL:-http://127.0.0.1:4000/v1}"
 export OPENAI_COMPAT_MODEL="${OPENAI_COMPAT_MODEL:-goose}"

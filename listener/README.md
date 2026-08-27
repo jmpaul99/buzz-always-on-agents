@@ -57,13 +57,17 @@ Sidecar PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_pr
 
 ## MCP catalog
 
-[`mcp-catalog.json`](mcp-catalog.json) is not in Buzz Desktop.
-
-**Always-on:** `buzz-dev-mcp` (shell / files / `buzz` CLI) via `BUZZ_ACP_MCP_COMMAND`.
+[`mcp-catalog.json`](mcp-catalog.json) is not in Buzz Desktop. Native buzz-acp has one stdio MCP slot, so [`run-mcp.sh`](run-mcp.sh) attaches [`local-mcp/mcp_manager.py`](local-mcp/mcp_manager.py). That process proxies **always-on** `buzz-dev-mcp` (shell / files / `buzz` CLI) and can spawn extras.
 
 **Dropped:** `playwright`, `chromedevtools`, `goosedocs`. No Chromium on the micro.
 
-**Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled**. Do not enable all eight on an e2-micro. HTTP GitHub/Stripe use `npx mcp-remote`. Keyword-per-mention recipes are gone; extras are session-scoped if you turn them on later. Google Workspace spawn spec is [`local-mcp/`](local-mcp/README.md).
+**Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled** in the committed catalog. Do not flip `enabled: true` there (LiteLLM keyword merge skips enabled extras). Agents call `mcp_list` / `mcp_enable` / `mcp_disable` / `mcp_register`. Enablement is **per agent**, cap **2** extras (`MAX_ENABLED`), persisted in `/var/lib/buzz-listener/agents/<slug>/mcp-enabled.json`. `mcp_register` appends `/etc/buzz/_mcp-overlay.json` (survives listener redeploy; the shipped catalog is overwritten). Extra tool names are `{slug}__{tool}`. Tools from a new enable are guaranteed on the **next** mention.
+
+HTTP GitHub/Stripe use `npx mcp-remote`. Node.js and `uv` are installed on the micro so those spawn specs can run. Google Workspace spawn spec is [`local-mcp/`](local-mcp/README.md). Overlay slugs do **not** update Cloud Run COMPLEX keywords until the next LiteLLM image build (keywords come from the committed catalog only).
+
+Spawn follows the same trusted/untrusted boundary as [block/buzz#6651](https://github.com/block/buzz/pull/6651): only the proxied `buzz-dev-mcp` child receives `BUZZ_PRIVATE_KEY` / `BUZZ_RELAY_URL` / `BUZZ_AUTH_TAG`. Extras get declared API keys only. Child start failures fail closed and do not echo argv (commands may embed keys). This repo cannot use `BUZZ_ACP_EXTRA_MCP_COMMANDS` until that PR is in `sprig-latest`.
+
+A short skill is copied to `$WORKSPACE/agents/<slug>/.agents/skills/mcp-manager/SKILL.md` on `buzz-acp@` start.
 
 ## LiteLLM
 
@@ -93,12 +97,15 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 | --- | --- |
 | `listener.py` | Control API; starts/stops `buzz-acp@` on PUT/DELETE |
 | `run-acp.sh` | Env mapping then `exec buzz-acp` |
+| `run-mcp.sh` | Stdio multiplexer (`mcp_manager.py`) |
 | `litellm_proxy.py` | Localhost IAM proxy to Cloud Run LiteLLM |
 | `cloud_agents.py` | Chat confirm create/update (`buzz-cloud-agents`) |
 | `agentutil.py` | Env records, permissions, Desktop merge helpers |
 | `nostrutil.py` | nsec decode, schnorr sign |
-| `mcp_catalog.py` / `mcp-catalog.json` | Always-on + disabled extras |
-| `local-mcp/google_adc_mcp.py` | Optional Google Workspace extra (`googleadc`, off by default) |
+| `mcp_catalog.py` / `mcp-catalog.json` | Shipped always-on + extras; overlay merge; enable-set helpers |
+| `local-mcp/mcp_manager.py` | Proxies `buzz-dev-mcp`; list/enable/disable/register extras |
+| `local-mcp/google_adc_mcp.py` | Optional Google Workspace extra (`googleadc`) |
+| `skills/mcp-manager/SKILL.md` | Copied into each agent cwd for `load_skill` |
 
 `agentutil.py` is also copied next to the Windows and macOS sync sidecars so Desktop and the VM share slug/allowlist/roster merge rules.
 
@@ -122,4 +129,4 @@ From the repo root:
 python -m unittest discover -s tests/listener
 ```
 
-No GCP. `test_agentutil.py` covers Desktop compact/merge and multi-Desktop roster import/delete. `test_control.py` covers sidecar vs apply tokens. `test_mcp_catalog.py` asserts no browser slugs and disabled extras.
+No GCP. `test_agentutil.py` covers Desktop compact/merge and multi-Desktop roster import/delete. `test_control.py` covers sidecar vs apply tokens. `test_mcp_catalog.py` asserts no browser slugs, disabled extras, overlay merge, and register guards. `test_mcp_manager.py` drives a fake stdio child for list/enable/disable/register.

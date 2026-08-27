@@ -80,7 +80,7 @@ Cloud Build (`cloudbuild-litellm.yaml`) → `…/buzz/litellm:latest` → Cloud 
 - Creates `e2-micro` `buzz-listener` if missing: Ubuntu 24.04, 30 GB pd-standard, PREMIUM IPv4, listener SA, tag `iap-ssh`, OS Login metadata off (SSH via IAP + project keys)
 - Ensures `allow-iap-8743`
 - `gcloud compute scp --tunnel-through-iap` of listener sources, systemd units, sprig install
-- Remote install: venv, pip, sprig (`buzz` / `buzz-acp` / `buzz-agent` / `buzz-dev-mcp`), control API, LiteLLM proxy, `buzz-acp@` template
+- Remote install: venv, pip, Node.js/`uv`, sprig (`buzz` / `buzz-acp` / `buzz-agent` / `buzz-dev-mcp`), MCP multiplexer (`run-mcp.sh`), control API, LiteLLM proxy, `buzz-acp@` template
 - Writes `/etc/buzz/_runtime.env` (LiteLLM URL + master key, `OPENAI_COMPAT_*`, apply SA). Never printed.
 - Enables `buzz-listener` and `buzz-litellm-proxy` always; enables `buzz-acp@<slug>` for each existing env file
 

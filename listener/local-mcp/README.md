@@ -1,6 +1,6 @@
 # Google Workspace MCP (ADC)
 
-Optional stdio MCP for Gmail, Drive, Calendar, and Sheets using **gcloud Application Default Credentials**. Listed in [`mcp-catalog.json`](../mcp-catalog.json) as extra `googleadc` (`enabled: false`). Do not turn it on by default on an e2-micro.
+Optional stdio MCP for Gmail, Drive, Calendar, and Sheets using **gcloud Application Default Credentials**. Listed in [`mcp-catalog.json`](../mcp-catalog.json) as extra `googleadc` (`enabled: false`). Cloud agents enable it with `mcp_enable` on the multiplexer ([`mcp_manager.py`](mcp_manager.py)); do not turn it on by default on an e2-micro.
 
 Gmail, Drive, and Calendar tools match Google's remote Workspace MCP servers (the same endpoints the [Gmail](https://github.com/cursor/plugins/tree/main/third_party/gmail), [Drive](https://github.com/cursor/plugins/tree/main/third_party/google-drive), and [Calendar](https://github.com/cursor/plugins/tree/main/third_party/google-calendar) Cursor plugins wrap). This process uses ADC instead of those HTTP MCP URLs because the listener VM has no browser for Google's OAuth prompt.
 
@@ -22,13 +22,26 @@ Scopes (must be on the ADC client — default ADC from `deploy.ps1` does **not**
 
 There is no browser on the micro. Authenticate on the Windows machine that runs `infra/create-secrets.ps1`, then redeploy the listener.
 
-1. Re-login ADC **with every scope above** (`--scopes` replaces the default set; omitting any of them drops that API):
+**Do not** use bare `gcloud auth application-default login --scopes=…gmail…`. Google's built-in gcloud OAuth client is not allowed to request Gmail / Drive / Calendar; the consent page returns **This app is blocked**. Use a Desktop OAuth client from **this** GCP project instead ([ADC + extra scopes](https://docs.cloud.google.com/docs/authentication/troubleshoot-adc#access-blocked-when-using-scopes)).
+
+1. OAuth consent screen (one-time) in [Google Auth Platform](https://console.cloud.google.com/auth/overview):
+
+   - User type **External** if the account is personal `@gmail.com` (Internal is Workspace-only).
+   - Publishing status **Testing**.
+   - Add your Google account under **Audience → Test users**.
+   - **Data Access → Add or remove scopes**, then add every scope listed above.
+
+2. Create a **Desktop app** OAuth client under [Credentials](https://console.cloud.google.com/auth/clients). Download the JSON outside the repo (for example `%USERPROFILE%\buzz-adc-client.json`). Do not commit it.
+
+3. Re-login ADC with **that** client and **every** scope (`--scopes` replaces the default set):
 
    ```powershell
-   gcloud auth application-default login --scopes="openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.compose,https://www.googleapis.com/auth/gmail.modify,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/drive.file,https://www.googleapis.com/auth/spreadsheets.readonly,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/calendar.calendarlist.readonly,https://www.googleapis.com/auth/calendar.events,https://www.googleapis.com/auth/calendar.events.freebusy"
+   gcloud auth application-default login --client-id-file="$env:USERPROFILE\buzz-adc-client.json" --scopes="openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.compose,https://www.googleapis.com/auth/gmail.modify,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/drive.file,https://www.googleapis.com/auth/spreadsheets.readonly,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/calendar.calendarlist.readonly,https://www.googleapis.com/auth/calendar.events,https://www.googleapis.com/auth/calendar.events.freebusy"
    ```
 
-2. Upload the user ADC file and redeploy:
+   If you see **Google hasn't verified this app**, that is expected in Testing: **Advanced → Go to \<app\> (unsafe)**. Leave every extra checkbox checked.
+
+4. Upload the user ADC file and redeploy:
 
    ```powershell
    .\infra\create-secrets.ps1
@@ -93,4 +106,4 @@ Match [Calendar MCP](https://developers.google.com/workspace/calendar/api/guides
 | `sheets_batch_update_values` | Write several ranges in one call |
 | `sheets_fill_colors` | Set cell background colors from hex |
 
-Keep `googleadc` disabled in the catalog until you explicitly enable that extra (RAM + Node/uv).
+Keep `googleadc` disabled in the committed catalog. Enable it per agent with `mcp_enable` (RAM + Node/uv).

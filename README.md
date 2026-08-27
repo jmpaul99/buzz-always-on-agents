@@ -9,7 +9,7 @@ Do not commit nsecs, gcloud tokens, Stripe/GitHub/Google secrets, ADC JSON, `.en
 ```
 Buzz Desktop / phone  →  community relay (WSS)
 e2-micro              →  buzz-acp@<slug> (one WSS + ACP client per agent)
-                         → stdio buzz-agent + buzz-dev-mcp
+                         → stdio buzz-agent + mcp_manager (buzz-dev-mcp + extras)
                          → localhost IAM proxy :4000
                             → Cloud Run LiteLLM (min 0)
                                → NIM / Groq / Gemini

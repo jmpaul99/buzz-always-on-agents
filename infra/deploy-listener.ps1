@@ -48,6 +48,7 @@ Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap `
     (Join-Path $listenerDir "add-agent.sh") `
     (Join-Path $listenerDir "remove-agent.sh") `
     (Join-Path $listenerDir "run-acp.sh") `
+    (Join-Path $listenerDir "run-mcp.sh") `
     (Join-Path $listenerDir "keepalive.sh") `
     (Join-Path $listenerDir "buzz-listener.service") `
     (Join-Path $listenerDir "buzz-acp@.service") `
@@ -60,21 +61,39 @@ $adcSrc = Join-Path $listenerDir "local-mcp\google_adc_mcp.py"
 if (Test-Path -LiteralPath $adcSrc) {
     Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $adcSrc "${inst}:${tmp}/google_adc_mcp.py"
 }
+$mgrSrc = Join-Path $listenerDir "local-mcp\mcp_manager.py"
+if (Test-Path -LiteralPath $mgrSrc) {
+    Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $mgrSrc "${inst}:${tmp}/mcp_manager.py"
+}
+$skillSrc = Join-Path $listenerDir "skills\mcp-manager\SKILL.md"
+if (Test-Path -LiteralPath $skillSrc) {
+    Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $skillSrc "${inst}:${tmp}/mcp-manager-skill.md"
+}
 
 $remote = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates tar
-install -d -m 755 /opt/buzz-listener /var/lib/buzz-listener /opt/sprig /opt/buzz/local-mcp
+apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates tar nodejs npm
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+fi
+install -d -m 755 /opt/buzz-listener /var/lib/buzz-listener /opt/sprig /opt/buzz/local-mcp /opt/buzz-listener/skills/mcp-manager
 install -d -m 700 /etc/buzz
 cp /tmp/buzz-listener-src/*.py /tmp/buzz-listener-src/requirements.txt /tmp/buzz-listener-src/mcp-catalog.json /opt/buzz-listener/
 if [ -f /tmp/buzz-listener-src/google_adc_mcp.py ]; then
   install -m 644 /tmp/buzz-listener-src/google_adc_mcp.py /opt/buzz/local-mcp/google_adc_mcp.py
 fi
+if [ -f /tmp/buzz-listener-src/mcp_manager.py ]; then
+  install -m 644 /tmp/buzz-listener-src/mcp_manager.py /opt/buzz/local-mcp/mcp_manager.py
+fi
+if [ -f /tmp/buzz-listener-src/mcp-manager-skill.md ]; then
+  install -m 644 /tmp/buzz-listener-src/mcp-manager-skill.md /opt/buzz-listener/skills/mcp-manager/SKILL.md
+fi
 install -m 755 /tmp/buzz-listener-src/add-agent.sh /opt/buzz-listener/add-agent.sh
 install -m 755 /tmp/buzz-listener-src/remove-agent.sh /opt/buzz-listener/remove-agent.sh
 install -m 755 /tmp/buzz-listener-src/run-acp.sh /opt/buzz-listener/run-acp.sh
+install -m 755 /tmp/buzz-listener-src/run-mcp.sh /opt/buzz-listener/run-mcp.sh
 install -m 755 /tmp/buzz-listener-src/keepalive.sh /opt/buzz-listener/keepalive.sh
 sed -i 's/\r$//' /opt/buzz-listener/*.sh /opt/buzz-listener/cloud_agents.py
 chmod +x /opt/buzz-listener/cloud_agents.py
@@ -139,7 +158,7 @@ $runtime = @(
     "BUZZ_AGENT_REQUIRE_REPLY=1",
     "BUZZ_ACP_AGENT_COMMAND=buzz-agent",
     "BUZZ_ACP_AGENT_ARGS=",
-    "BUZZ_ACP_MCP_COMMAND=buzz-dev-mcp",
+    "BUZZ_ACP_MCP_COMMAND=/opt/buzz-listener/run-mcp.sh",
     "LISTENER_CONTROL_URL=http://127.0.0.1:8743",
     "APPLY_SA=$sa",
     "BUZZ_WORKSPACE=/var/lib/buzz-listener",
