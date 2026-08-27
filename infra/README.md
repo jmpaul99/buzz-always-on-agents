@@ -83,7 +83,6 @@ Cloud Build (`cloudbuild-litellm.yaml`) → `…/buzz/litellm:latest` → Cloud 
 - Remote install: venv, pip, sprig (`buzz` / `buzz-acp` / `buzz-agent` / `buzz-dev-mcp`), control API, LiteLLM proxy, `buzz-acp@` template
 - Writes `/etc/buzz/_runtime.env` (LiteLLM URL + master key, `OPENAI_COMPAT_*`, apply SA). Never printed.
 - Enables `buzz-listener` and `buzz-litellm-proxy` always; enables `buzz-acp@<slug>` for each existing env file
-- Deletes leftover Cloud Run `goose-worker` if it still exists
 
 SSH:
 

@@ -83,8 +83,8 @@ Open agent cards may not redraw until you reopen them (or restart Desktop); the 
 | --- | --- |
 | [`deploy.ps1`](deploy.ps1) | One command: auth, secrets, GCP stack, Windows Desktop plugin |
 | [`listener/`](listener/README.md) | Control API, systemd `buzz-acp@`, LiteLLM proxy, MCP catalog, `add-agent.sh` / `remove-agent.sh` |
+| [`listener/local-mcp/`](listener/local-mcp/README.md) | Optional Google Workspace MCP (disabled extra) |
 | [`litellm/`](litellm/README.md) | Complexity auto-router image (NIM / Groq / Gemini / OpenRouter) |
-| [`goose/local-mcp/`](goose/local-mcp/README.md) | Optional Google Workspace MCP (disabled extra) |
 | [`infra/`](infra/README.md) | `gcloud` bootstrap, secrets, and deploy scripts |
 | [`windows/`](windows/README.md) | Desktop PATH plugin and Desktop ↔ listener sync sidecar (Windows) |
 | [`macos/`](macos/README.md) | Same PATH plugin and sync sidecar for Buzz Desktop on macOS |
@@ -115,7 +115,7 @@ That single command:
 4. Deploys APIs/IAM/AR → Secret Manager → LiteLLM → e2-micro (control API + buzz-acp + proxy)
 5. Installs the Windows Desktop PATH plugin and starts `BuzzCloudSync`
 
-Re-runs are safe (create-or-update). Pass `-SkipDesktop` for GCP only, `-SkipAuth` if you are already logged in, `-NonInteractive` to fail instead of prompting (fill `.env` first). A leftover Cloud Run `goose-worker` is deleted on listener deploy.
+Re-runs are safe (create-or-update). Pass `-SkipDesktop` for GCP only, `-SkipAuth` if you are already logged in, `-NonInteractive` to fail instead of prompting (fill `.env` first).
 
 On a **Mac**, after the GCP stack exists, install the Desktop plugin:
 

@@ -49,6 +49,13 @@ class McpCatalogTest(unittest.TestCase):
         self.assertIn("GITHUB_PERSONAL_ACCESS_TOKEN", by_slug["github"]["env_keys"])
         self.assertIn("STRIPE_API_KEY", by_slug["stripe"]["env_keys"])
 
+    def test_googleadc_points_at_vm_path_and_repo_source(self):
+        by_slug = {item["slug"]: item for item in mcp_catalog.entries(self.catalog, "extras")}
+        adc = by_slug["googleadc"]
+        self.assertIn("/opt/buzz/local-mcp/google_adc_mcp.py", adc["args"])
+        src = Path(__file__).resolve().parents[2] / "listener" / "local-mcp" / "google_adc_mcp.py"
+        self.assertTrue(src.is_file())
+
     def test_keywords_from_disabled_extras(self):
         keys = mcp_catalog.extra_keywords(self.catalog)
         self.assertIn("github", keys)

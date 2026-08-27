@@ -16,8 +16,7 @@ $apis = @(
     "iap.googleapis.com",
     "iam.googleapis.com",
     "cloudbuild.googleapis.com",
-    "cloudresourcemanager.googleapis.com",
-    "storage.googleapis.com"
+    "cloudresourcemanager.googleapis.com"
 )
 Invoke-Gcloud services enable @apis --project $Project --quiet
 

@@ -42,7 +42,7 @@ Shared runtime (`/etc/buzz/_runtime.env`, not an agent): LiteLLM URL + master ke
 
 ## Control API (`0.0.0.0:8743`)
 
-Firewall: IAP range `35.235.240.0/20` (`allow-iap-8743`). Sidecar token: `/etc/buzz/_sync.token` (`Authorization: Bearer …` or `X-Buzz-Sync-Token`). Chat apply (`buzz-cloud-agents` on this VM): Google ID token from `APPLY_SA` (listener SA) with audience `WORKER_APPLY_AUDIENCE` / `LISTENER_CONTROL_URL`. Unauthenticated `/health` and `/healthz` return `{"ok":true}`.
+Firewall: IAP range `35.235.240.0/20` (`allow-iap-8743`). Sidecar token: `/etc/buzz/_sync.token` (`Authorization: Bearer …` or `X-Buzz-Sync-Token`). Chat apply (`buzz-cloud-agents` on this VM): Google ID token from `APPLY_SA` (listener SA) with audience `LISTENER_CONTROL_URL`. Unauthenticated `/health` and `/healthz` return `{"ok":true}`.
 
 | Method | Path | Body / result |
 | --- | --- | --- |
@@ -63,7 +63,7 @@ Sidecar PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_pr
 
 **Dropped:** `playwright`, `chromedevtools`, `goosedocs`. No Chromium on the micro.
 
-**Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled**. Do not enable all eight on an e2-micro. HTTP GitHub/Stripe use `npx mcp-remote`. Keyword-per-mention recipes are gone; extras are session-scoped if you turn them on later.
+**Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled**. Do not enable all eight on an e2-micro. HTTP GitHub/Stripe use `npx mcp-remote`. Keyword-per-mention recipes are gone; extras are session-scoped if you turn them on later. Google Workspace spawn spec is [`local-mcp/`](local-mcp/README.md).
 
 ## LiteLLM
 
@@ -98,6 +98,7 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 | `agentutil.py` | Env records, permissions, Desktop merge helpers |
 | `nostrutil.py` | nsec decode, schnorr sign |
 | `mcp_catalog.py` / `mcp-catalog.json` | Always-on + disabled extras |
+| `local-mcp/google_adc_mcp.py` | Optional Google Workspace extra (`googleadc`, off by default) |
 
 `agentutil.py` is also copied next to the Windows and macOS sync sidecars so Desktop and the VM share slug/allowlist/roster merge rules.
 
@@ -121,4 +122,4 @@ From the repo root:
 python -m unittest discover -s tests/listener
 ```
 
-No GCP. `test_agentutil.py` covers mention filters (used by native buzz-acp env), Desktop compact/merge, and multi-Desktop roster import/delete. `test_control.py` covers sidecar vs apply tokens. `test_mcp_catalog.py` asserts no browser slugs and disabled extras.
+No GCP. `test_agentutil.py` covers Desktop compact/merge and multi-Desktop roster import/delete. `test_control.py` covers sidecar vs apply tokens. `test_mcp_catalog.py` asserts no browser slugs and disabled extras.

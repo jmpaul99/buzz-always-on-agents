@@ -39,7 +39,6 @@ $tmp = "/tmp/buzz-listener-src"
 Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap `
     (Join-Path $listenerDir "listener.py") `
     (Join-Path $listenerDir "agentutil.py") `
-    (Join-Path $listenerDir "seen.py") `
     (Join-Path $listenerDir "mcp_catalog.py") `
     (Join-Path $listenerDir "mcp-catalog.json") `
     (Join-Path $listenerDir "litellm_proxy.py") `
@@ -57,7 +56,7 @@ Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap `
     (Join-Path $listenerDir "buzz-keepalive.timer") `
     "${inst}:${tmp}/"
 
-$adcSrc = Join-Path $Root "goose\local-mcp\google_adc_mcp.py"
+$adcSrc = Join-Path $listenerDir "local-mcp\google_adc_mcp.py"
 if (Test-Path -LiteralPath $adcSrc) {
     Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $adcSrc "${inst}:${tmp}/google_adc_mcp.py"
 }
@@ -100,10 +99,11 @@ ln -sfn /opt/sprig/sprig /usr/local/bin/buzz-acp
 ln -sfn /opt/sprig/sprig /usr/local/bin/buzz-agent
 ln -sfn /opt/sprig/sprig /usr/local/bin/buzz-dev-mcp
 ln -sfn /opt/sprig/sprig /usr/local/bin/sprig
+cd /
 rm -rf /tmp/sprig
-python3 -m venv /opt/buzz-listener/.venv
-/opt/buzz-listener/.venv/bin/pip install -q --upgrade pip
-/opt/buzz-listener/.venv/bin/pip install -q -r /opt/buzz-listener/requirements.txt
+python3 -m venv --clear /opt/buzz-listener/.venv
+/opt/buzz-listener/.venv/bin/python -m pip install -q --upgrade pip
+/opt/buzz-listener/.venv/bin/python -m pip install -q -r /opt/buzz-listener/requirements.txt
 systemctl daemon-reload
 systemctl enable --now buzz-keepalive.timer
 systemctl enable --now buzz-litellm-proxy.service
@@ -141,7 +141,6 @@ $runtime = @(
     "BUZZ_ACP_AGENT_ARGS=",
     "BUZZ_ACP_MCP_COMMAND=buzz-dev-mcp",
     "LISTENER_CONTROL_URL=http://127.0.0.1:8743",
-    "WORKER_APPLY_AUDIENCE=http://127.0.0.1:8743",
     "APPLY_SA=$sa",
     "BUZZ_WORKSPACE=/var/lib/buzz-listener",
     "GOOGLE_CLOUD_PROJECT=$Project"
@@ -193,15 +192,24 @@ if (Test-Secret "gcloud-adc") {
     & gcloud secrets versions access latest --secret=gcloud-adc --project $Project --out-file=$adcTmp 1>$null
     if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $adcTmp)) {
         Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $adcTmp "${inst}:/tmp/_adc.json"
-        Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo install -m 600 /tmp/_adc.json /etc/buzz/_adc.json && sudo rm -f /tmp/_adc.json && printf '\nGOOGLE_APPLICATION_CREDENTIALS=/etc/buzz/_adc.json\n' | sudo tee -a /etc/buzz/_runtime.env >/dev/null"
-        Remove-Item -Force $adcTmp -ErrorAction SilentlyContinue
+        $afterAdc = @'
+set -euo pipefail
+install -m 600 /tmp/_adc.json /etc/buzz/_adc.json
+rm -f /tmp/_adc.json
+grep -q '^GOOGLE_APPLICATION_CREDENTIALS=' /etc/buzz/_runtime.env || printf '\nGOOGLE_APPLICATION_CREDENTIALS=/etc/buzz/_adc.json\n' >> /etc/buzz/_runtime.env
+systemctl restart buzz-litellm-proxy.service
+systemctl restart buzz-listener.service
+systemctl list-units --type=service --all 'buzz-acp@*' --no-legend | awk '{print $1}' | while read -r u; do
+  [ -n "$u" ] || continue
+  systemctl restart "$u" || true
+done
+'@
+        $afterAdcPath = Join-Path $env:TEMP "buzz-after-adc.sh"
+        [System.IO.File]::WriteAllText($afterAdcPath, (($afterAdc -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd() + "`n")
+        Invoke-Gcloud compute scp --project $Project --zone $Zone --tunnel-through-iap $afterAdcPath "${inst}:/tmp/after-adc.sh"
+        Invoke-Gcloud compute ssh $inst --project $Project --zone $Zone --tunnel-through-iap --command "sudo bash /tmp/after-adc.sh"
+        Remove-Item -Force $adcTmp, $afterAdcPath -ErrorAction SilentlyContinue
     }
-}
-
-& gcloud run services describe $C.GOOSE_SERVICE --project $Project --region $Region 1>$null 2>$null
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "deleting retired Cloud Run $($C.GOOSE_SERVICE)"
-    & gcloud run services delete $C.GOOSE_SERVICE --project $Project --region $Region --quiet
 }
 
 $ip = (& gcloud compute instances describe $inst --project $Project --zone $Zone --format="value(networkInterfaces[0].accessConfigs[0].natIP)").Trim()

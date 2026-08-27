@@ -10,10 +10,8 @@ $script:C = @{
     GCP_ZONE          = "us-central1-a"
     AR_REPO           = "buzz"
     LITELLM_SERVICE   = "litellm-goose"
-    GOOSE_SERVICE     = "goose-worker"
     LISTENER_INSTANCE = "buzz-listener"
     LISTENER_SA       = "buzz-listener"
-    GOOSE_SA          = "goose-job"
     LITELLM_SA        = "litellm-goose"
     IAP_TAG           = "iap-ssh"
 }
@@ -41,7 +39,6 @@ Set-FromEnv "GCP_REGION" @("GCP_REGION", "BUZZ_GCP_REGION")
 Set-FromEnv "GCP_ZONE" @("GCP_ZONE", "BUZZ_GCP_ZONE")
 Set-FromEnv "LISTENER_INSTANCE" @("BUZZ_GCP_INSTANCE")
 Set-FromEnv "RELAY_URL" @("BUZZ_RELAY_URL", "RELAY_URL")
-Set-FromEnv "WORKSPACE_BUCKET" @("WORKSPACE_BUCKET", "BUZZ_WORKSPACE_BUCKET")
 
 $script:Project = $C.GCP_PROJECT
 $script:Region = $C.GCP_REGION

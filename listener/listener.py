@@ -31,19 +31,10 @@ STATE_DIR = pathlib.Path(os.environ.get("BUZZ_STATE_DIR", "/var/lib/buzz-listene
 RELAY_URL = os.environ.get("BUZZ_RELAY_URL", au.DEFAULT_RELAY)
 CONTROL_HOST = os.environ.get("BUZZ_CONTROL_HOST", "0.0.0.0")
 CONTROL_PORT = int(os.environ.get("BUZZ_CONTROL_PORT", "8743"))
-APPLY_SA = (
-    os.environ.get("APPLY_SA") or os.environ.get("GOOSE_WORKER_SA") or ""
-).strip().lower()
-WORKER_APPLY_AUDIENCE = (
-    os.environ.get("WORKER_APPLY_AUDIENCE") or os.environ.get("LISTENER_CONTROL_URL") or ""
-).strip()
+APPLY_SA = (os.environ.get("APPLY_SA") or "").strip().lower()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 # Tests assign a callable(token) -> bool. Production uses Google ID tokens.
 _worker_token_checker = None
-
-should_handle = au.should_handle
-channel_from_event = au.channel_from_event
-owner_control_command = au.owner_control_command
 
 
 def load_agents() -> list[dict[str, Any]]:
@@ -190,18 +181,8 @@ def list_agent_index() -> list[dict[str, Any]]:
 def worker_token_ok(token: str) -> bool:
     if _worker_token_checker is not None:
         return bool(_worker_token_checker(token))
-    email = (
-        os.environ.get("APPLY_SA")
-        or os.environ.get("GOOSE_WORKER_SA")
-        or APPLY_SA
-        or ""
-    ).strip().lower()
-    audience = (
-        os.environ.get("WORKER_APPLY_AUDIENCE")
-        or os.environ.get("LISTENER_CONTROL_URL")
-        or WORKER_APPLY_AUDIENCE
-        or ""
-    ).strip()
+    email = (os.environ.get("APPLY_SA") or APPLY_SA or "").strip().lower()
+    audience = (os.environ.get("LISTENER_CONTROL_URL") or "").strip()
     if not token or not email or not audience:
         return False
     try:
