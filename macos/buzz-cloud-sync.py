@@ -26,14 +26,44 @@ for extra in (_HERE, _HERE.parent / "listener"):
 
 import agentutil as au  # noqa: E402
 
-DEFAULT_PROJECT = os.environ.get("BUZZ_GCP_PROJECT", "your-gcp-project")
-DEFAULT_ZONE = os.environ.get("BUZZ_GCP_ZONE", "us-central1-a")
-DEFAULT_INSTANCE = os.environ.get("BUZZ_GCP_INSTANCE", "buzz-listener")
 SYNC_URL = os.environ.get("BUZZ_SYNC_URL", "http://127.0.0.1:8743").rstrip("/")
 DEBOUNCE_SECS = 0.4
 PULL_SECS = 5.0
 TUNNEL_WAIT_SECS = 45
+TUNNEL_RETRY_SECS = 5.0
+TUNNEL_RETRY_MAX = 60.0
 LOCK_NAME = "cloud-sync.lock"
+_GCP_IDS: tuple[str, str, str] | None = None
+
+
+def gcp_ids() -> tuple[str, str, str]:
+    """Resolve IAP target; never keep the install placeholder if gcloud knows the project."""
+    global _GCP_IDS
+    if _GCP_IDS is not None:
+        return _GCP_IDS
+    extra: dict[str, str] = {}
+    env_path = pathlib.Path(__file__).with_name("buzz-cloud.env")
+    if env_path.is_file():
+        try:
+            extra = au.load_env_file(env_path)
+        except OSError:
+            extra = {}
+    gcloud_project = ""
+    if au.resolve_gcp_target(dict(os.environ), extra, "")[0] == au.GCP_PLACEHOLDER:
+        try:
+            result = _run(_gcloud_argv() + ["config", "get-value", "project"], timeout=20)
+            gcloud_project = (result.stdout or "").strip().splitlines()
+            gcloud_project = gcloud_project[-1].strip() if gcloud_project else ""
+        except Exception:
+            gcloud_project = ""
+    _GCP_IDS = au.resolve_gcp_target(dict(os.environ), extra, gcloud_project)
+    return _GCP_IDS
+
+
+def _project_args(project: str) -> list[str]:
+    if not project or project == au.GCP_PLACEHOLDER:
+        return []
+    return [f"--project={project}"]
 
 
 def _augment_path() -> None:
@@ -343,42 +373,52 @@ class Tunnel:
         _kill_tree(pid)
 
     def start(self) -> None:
+        if self.proc is not None:
+            code = self.proc.poll()
+            if code is not None:
+                log(f"{self.mode or 'iap'} tunnel exited {code}")
         self.stop()
+        project, zone, instance = gcp_ids()
         self.proc = _popen(
             _gcloud_argv()
             + [
                 "compute",
                 "start-iap-tunnel",
-                DEFAULT_INSTANCE,
+                instance,
                 "8743",
                 "--local-host-port=127.0.0.1:8743",
-                f"--zone={DEFAULT_ZONE}",
-                f"--project={DEFAULT_PROJECT}",
+                f"--zone={zone}",
                 "--quiet",
             ]
+            + _project_args(project)
         )
         self.mode = "iap"
-        log("iap tcp tunnel started")
+        log(f"iap tcp tunnel started ({instance})")
 
     def start_ssh_fallback(self) -> None:
+        if self.proc is not None:
+            code = self.proc.poll()
+            if code is not None:
+                log(f"{self.mode or 'iap'} tunnel exited {code}")
         self.stop()
+        project, zone, instance = gcp_ids()
         self.proc = _popen(
             _gcloud_argv()
             + [
                 "compute",
                 "ssh",
-                DEFAULT_INSTANCE,
-                f"--project={DEFAULT_PROJECT}",
-                f"--zone={DEFAULT_ZONE}",
+                instance,
+                f"--zone={zone}",
                 "--tunnel-through-iap",
                 "--quiet",
                 "--ssh-flag=-N",
                 "--ssh-flag=-n",
                 "--ssh-flag=-L127.0.0.1:8743:127.0.0.1:8743",
             ]
+            + _project_args(project)
         )
         self.mode = "ssh"
-        log("iap ssh local-forward started")
+        log(f"iap ssh local-forward started ({instance})")
 
 
 def health_ok() -> bool:
@@ -390,17 +430,17 @@ def health_ok() -> bool:
 
 
 def fetch_token() -> str:
+    project, zone, instance = gcp_ids()
     result = _run(
         _gcloud_argv() + [
             "compute",
             "ssh",
-            DEFAULT_INSTANCE,
-            f"--project={DEFAULT_PROJECT}",
-            f"--zone={DEFAULT_ZONE}",
+            instance,
+            f"--zone={zone}",
             "--tunnel-through-iap",
             "--quiet",
             "--command=sudo cat /etc/buzz/_sync.token",
-        ],
+        ] + _project_args(project),
         timeout=90,
     )
     if result.returncode != 0:
@@ -476,10 +516,11 @@ def provider_backend(existing: dict[str, Any] | None = None) -> dict[str, Any]:
     existing = existing if isinstance(existing, dict) else {}
     cfg = existing.get("config") if isinstance(existing.get("config"), dict) else {}
     if not cfg:
+        project, zone, instance = gcp_ids()
         cfg = {
-            "project": DEFAULT_PROJECT,
-            "zone": DEFAULT_ZONE,
-            "instance": DEFAULT_INSTANCE,
+            "project": project,
+            "zone": zone,
+            "instance": instance,
             "remote_script": "/opt/buzz-listener/add-agent.sh",
         }
     pid = str(existing.get("id") or "").strip() or "cloud"
@@ -510,6 +551,18 @@ def mark_cloud_backend(row: dict[str, Any], slug: str) -> None:
         slug,
         provider_backend(row.get("backend") if isinstance(row.get("backend"), dict) else None),
     )
+
+
+def _stamp_cloud_runtime(row: dict[str, Any]) -> None:
+    """Re-assert cloud harness + is_active=false so Desktop cannot steal the nsec."""
+    backend = row.get("backend") if isinstance(row.get("backend"), dict) else {}
+    pk = str(row.get("pubkey") or "").lower()
+    cloud = str(backend.get("id") or "") == "cloud" or bool(row.get("backend_agent_id"))
+    if not au.PUBKEY_RE.match(pk) or not cloud:
+        sanitize_backend(row)
+        return
+    slug = str(row.get("backend_agent_id") or row.get("slug") or au.slug_name(str(row.get("name") or "agent")))
+    mark_cloud_backend(row, slug)
 
 
 def push(state: dict[str, Any], records: list, blob: dict[str, Any]) -> bool:
@@ -627,8 +680,14 @@ def persist_records(path: pathlib.Path, records: list) -> None:
         records, _dropped = au.compact_desktop_records(records)
         for row in records:
             if isinstance(row, dict):
-                sanitize_backend(row)
-        save_json(path, records)
+                _stamp_cloud_runtime(row)
+        text = json.dumps(records, indent=2)
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
         return
     save_json(path, records)
 
@@ -665,11 +724,10 @@ def sync_once(state: dict[str, Any]) -> dict[str, Any]:
         state["agents"] = tracked
         persist_records(agents_path, records)
         log(f"compacted desktop store; dropped {len(dropped)} duplicate cards")
-    pulled = pull(state, records)
+    pull(state, records)
     blob = read_cred_blob()
-    wrote = push(state, records, blob)
-    if wrote or pulled or dropped:
-        persist_records(agents_path, records)
+    push(state, records, blob)
+    persist_records(agents_path, records)
     save_state(state)
     return state
 
@@ -680,57 +738,84 @@ def watch_loop(once: bool) -> None:
     teams_path = agents_dir / "teams.json"
     tunnel = Tunnel()
     state = load_state()
+    backoff = TUNNEL_RETRY_SECS
     try:
-        tunnel.start()
-        wait_for_api(tunnel)
-        log("control api reachable")
-        if not state.get("token"):
-            state["token"] = fetch_token()
-            save_state(state)
-        if once:
-            sync_once(state)
-            return
-        last_mtime = 0.0
-        pending_since = 0.0
-        last_pull = 0.0
-        last_healthy = time.monotonic()
         while True:
-            if health_ok():
-                last_healthy = time.monotonic()
-            elif not tunnel.alive() or time.monotonic() - last_healthy > 30:
-                log("tunnel down; restarting")
-                tunnel.start()
+            tunnel.start()
+            try:
                 wait_for_api(tunnel)
-                last_healthy = time.monotonic()
-            mtime = 0.0
-            for path in (agents_path, teams_path):
+            except RuntimeError as exc:
+                log(f"{exc}; retry in {int(backoff)}s")
+                if once:
+                    raise
+                time.sleep(backoff)
+                backoff = min(backoff * 2, TUNNEL_RETRY_MAX)
+                continue
+            backoff = TUNNEL_RETRY_SECS
+            log("control api reachable")
+            if not state.get("token"):
                 try:
-                    mtime = max(mtime, path.stat().st_mtime)
-                except OSError:
-                    pass
-            now = time.monotonic()
-            if mtime > last_mtime:
-                last_mtime = mtime
-                pending_since = now
-            if pending_since and now - pending_since >= DEBOUNCE_SECS:
-                pending_since = 0.0
-                try:
-                    state = load_state()
-                    sync_once(state)
-                except Exception:
-                    log("push failed")
-                    traceback.print_exc()
-            if now - last_pull >= PULL_SECS:
-                last_pull = now
-                try:
-                    state = load_state()
-                    records = load_json(agents_path, [])
-                    if isinstance(records, list) and pull(state, records):
-                        persist_records(agents_path, records)
+                    state["token"] = fetch_token()
                     save_state(state)
                 except Exception:
-                    log("pull failed")
-            time.sleep(0.4)
+                    log("token fetch failed")
+                    traceback.print_exc()
+                    if once:
+                        raise
+                    time.sleep(backoff)
+                    continue
+            if once:
+                sync_once(state)
+                return
+            last_mtime = 0.0
+            pending_since = 0.0
+            last_pull = 0.0
+            last_healthy = time.monotonic()
+            while True:
+                if health_ok():
+                    last_healthy = time.monotonic()
+                elif not tunnel.alive() or time.monotonic() - last_healthy > 30:
+                    log("tunnel down; restarting")
+                    tunnel.start()
+                    try:
+                        wait_for_api(tunnel)
+                    except RuntimeError as exc:
+                        log(f"{exc}; retry in {int(backoff)}s")
+                        time.sleep(backoff)
+                        backoff = min(backoff * 2, TUNNEL_RETRY_MAX)
+                        break
+                    backoff = TUNNEL_RETRY_SECS
+                    last_healthy = time.monotonic()
+                mtime = 0.0
+                for path in (agents_path, teams_path):
+                    try:
+                        mtime = max(mtime, path.stat().st_mtime)
+                    except OSError:
+                        pass
+                now = time.monotonic()
+                if mtime > last_mtime:
+                    last_mtime = mtime
+                    pending_since = now
+                if pending_since and now - pending_since >= DEBOUNCE_SECS:
+                    pending_since = 0.0
+                    try:
+                        state = load_state()
+                        sync_once(state)
+                    except Exception:
+                        log("push failed")
+                        traceback.print_exc()
+                if now - last_pull >= PULL_SECS:
+                    last_pull = now
+                    try:
+                        state = load_state()
+                        records = load_json(agents_path, [])
+                        if isinstance(records, list):
+                            pull(state, records)
+                            persist_records(agents_path, records)
+                        save_state(state)
+                    except Exception:
+                        log("pull failed")
+                time.sleep(0.4)
     finally:
         tunnel.stop()
 
@@ -743,13 +828,16 @@ def main() -> int:
         if lock is None:
             log("another BuzzCloudSync is already running; exiting")
             return 0
-    try:
-        watch_loop(once)
-        return 0
-    except Exception as exc:
-        log(f"fatal {type(exc).__name__}")
-        traceback.print_exc()
-        return 1
+    while True:
+        try:
+            watch_loop(once)
+            return 0
+        except Exception as exc:
+            log(f"fatal {type(exc).__name__}")
+            traceback.print_exc()
+            if once:
+                return 1
+            time.sleep(TUNNEL_RETRY_SECS)
 
 
 if __name__ == "__main__":

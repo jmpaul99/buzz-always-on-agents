@@ -14,7 +14,9 @@ from typing import Any
 SKIP = {"true", "false", "null", "none", "builtin", "platform", "stdio"}
 BROWSER_SLUGS = {"playwright", "chromedevtools", "goosedocs"}
 MAX_ENABLED = 2
-ALLOWED_COMMANDS = {"npx", "uv", "uvx", "python", "python3"}
+EXTRA_PAGE_SIZE = 12
+ALLOWED_COMMANDS = {"npx", "uv", "uvx", "python", "python3", "github-mcp-server"}
+_ENV_BRACE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 NPX_PACKAGE_RE = re.compile(r"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+$")
 # Withheld from untrusted extras. Same identity set as block/buzz#6651
@@ -160,6 +162,60 @@ def find_extra(slug: str, catalog: dict[str, Any], overlay: dict[str, Any] | Non
     return extras_by_slug(catalog, overlay).get(slug)
 
 
+def load_kv_env(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        if key:
+            out[key] = val.strip().strip('"').strip("'")
+    return out
+
+
+def infer_agent_name(environ: dict[str, str], cwd: Path | None = None) -> str:
+    name = str(environ.get("AGENT_NAME") or "").strip()
+    if name and SLUG_RE.match(name):
+        return name
+    here = cwd if cwd is not None else Path(environ.get("PWD") or Path.cwd())
+    if here.parent.name == "agents" and SLUG_RE.match(here.name):
+        return here.name
+    return name
+
+
+def fill_missing_from_runtime(
+    environ: dict[str, str],
+    runtime_path: Path | None = None,
+    *,
+    cwd: Path | None = None,
+) -> dict[str, str]:
+    """Copy extra MCP credentials from the VM runtime file.
+
+    buzz-agent only forwards Buzz identity into the MCP child (block/buzz#6651).
+    GitHub/Tavily/Google keys live in ``/etc/buzz/_runtime.env``.
+    """
+    out = dict(environ)
+    path = runtime_path if runtime_path is not None else Path(
+        out.get("BUZZ_RUNTIME_ENV") or "/etc/buzz/_runtime.env"
+    )
+    for key, val in load_kv_env(path).items():
+        if key in SECRET_ENV or is_buzz_identity_env(key):
+            continue
+        if str(out.get(key) or "").strip():
+            continue
+        if str(val or "").strip():
+            out[key] = val
+    if not str(out.get("AGENT_NAME") or "").strip():
+        inferred = infer_agent_name(out, cwd)
+        if inferred:
+            out["AGENT_NAME"] = inferred
+    return out
+
+
 def missing_env_keys(item: dict[str, Any], env: dict[str, str] | None = None) -> list[str]:
     parent = env if env is not None else dict(os.environ)
     keys = item.get("env_keys") or []
@@ -174,12 +230,33 @@ def missing_env_keys(item: dict[str, Any], env: dict[str, str] | None = None) ->
     return missing
 
 
-def extra_status(item: dict[str, Any], enabled_slugs: list[str], env: dict[str, str] | None = None) -> dict[str, Any]:
+def extra_status(
+    item: dict[str, Any],
+    enabled_slugs: list[str],
+    env: dict[str, str] | None = None,
+    *,
+    running: bool = False,
+    starting: bool = False,
+    tool_count: int = 0,
+    last_error: str | None = None,
+) -> dict[str, Any]:
     slug = str(item.get("slug") or "")
+    if running:
+        status = "running"
+    elif starting or (slug in enabled_slugs and not last_error):
+        status = "starting"
+    elif last_error:
+        status = "failed"
+    else:
+        status = "off"
     return {
         "slug": slug,
         "name": str(item.get("display_name") or item.get("name") or slug),
-        "enabled": slug in enabled_slugs,
+        "enabled": status in {"running", "starting"},
+        "status": status,
+        "running": running,
+        "tool_count": tool_count,
+        "last_error": last_error,
         "source": str(item.get("_source") or "catalog"),
         "missing_env_keys": missing_env_keys(item, env),
         "command": str(item.get("command") or ""),
@@ -236,13 +313,34 @@ def disable_slug(enabled: list[str], slug: str) -> list[str]:
     return [item for item in enabled if item != slug]
 
 
+def page_tools(
+    tools: list[dict[str, Any]],
+    cursor: str | int | None = None,
+    size: int = EXTRA_PAGE_SIZE,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Return one page of tools and the next cursor (offset string), or None."""
+    start = 0
+    if cursor not in (None, ""):
+        try:
+            start = max(0, int(cursor))
+        except (TypeError, ValueError):
+            start = 0
+    page = [dict(item) for item in tools[start : start + size]]
+    nxt = start + size
+    if nxt >= len(tools):
+        return page, None
+    return page, str(nxt)
+
+
 def extra_tool_name(slug: str, tool: str) -> str:
-    return f"{slug}__{tool}"
+    # Slugs cannot contain `_` (SLUG_RE). buzz-agent rejects bare tool names
+    # that contain `__` (it uses that as server__tool itself).
+    return f"{slug}_{tool}"
 
 
 def split_extra_tool(name: str, slugs: list[str]) -> tuple[str, str] | None:
     for slug in sorted(slugs, key=len, reverse=True):
-        prefix = f"{slug}__"
+        prefix = f"{slug}_"
         if name.startswith(prefix) and name != prefix:
             return slug, name[len(prefix) :]
     return None
@@ -289,6 +387,30 @@ def child_env(
             if key in SECRET_ENV or is_buzz_identity_env(key):
                 out.pop(key, None)
     return out
+
+
+def extra_child_env(item: dict[str, Any], parent: dict[str, str] | None = None) -> dict[str, str]:
+    """Untrusted extra env: declared keys plus catalog ``env`` (non-secret literals)."""
+    out = child_env(list(item.get("env_keys") or []), parent, trusted=False)
+    static = item.get("env") or {}
+    if not isinstance(static, dict):
+        return out
+    for key, val in static.items():
+        if not isinstance(key, str) or not isinstance(val, str) or not key:
+            continue
+        if key in SECRET_ENV or is_buzz_identity_env(key):
+            continue
+        out[key] = val
+    return out
+
+
+def expand_args(args: list[str], env: dict[str, str]) -> list[str]:
+    """Replace ``${NAME}`` from env. Do not log the result (may contain tokens)."""
+
+    def repl(match: re.Match[str]) -> str:
+        return str(env.get(match.group(1) or "") or "")
+
+    return [_ENV_BRACE.sub(repl, item) for item in args]
 
 
 def _check_arg(value: str, label: str) -> None:
@@ -357,6 +479,9 @@ def validate_register(
         _check_arg(item, "arg")
     if command == "npx":
         _validate_npx_args(args)
+    elif command == "github-mcp-server":
+        if args != ["stdio"]:
+            raise ValueError("github-mcp-server args must be [\"stdio\"]")
     elif command in {"python", "python3"}:
         _validate_python_args(args)
 

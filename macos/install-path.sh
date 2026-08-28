@@ -118,6 +118,11 @@ if [[ -f "$listener_nostr" ]]; then
   cp -f "$listener_nostr" "${bin}/nostrutil.py"
 fi
 cp -f "${here}/buzz-cloud-sync.py" "$sync_impl"
+cat > "${bin}/buzz-cloud.env" <<EOF
+BUZZ_GCP_PROJECT=${BUZZ_GCP_PROJECT}
+BUZZ_GCP_ZONE=${BUZZ_GCP_ZONE}
+BUZZ_GCP_INSTANCE=${BUZZ_GCP_INSTANCE}
+EOF
 
 path_extra="${python_dir}:${bin}:${gcloud_dir}:/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin:/usr/bin:/bin"
 

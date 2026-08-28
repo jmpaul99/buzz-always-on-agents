@@ -125,5 +125,22 @@ class GmailDriveCalendarHelperTests(unittest.TestCase):
         self.assertEqual(encoded, g.base64.b64encode(b"\xff\xfe").decode("ascii"))
 
 
+class SuiteTests(unittest.TestCase):
+    def test_apply_suite_keeps_one_prefix(self):
+        server = type("S", (), {})()
+        server._tools = {
+            "gmail_list_labels": object(),
+            "drive_search": object(),
+            "calendar_list_calendars": object(),
+            "sheets_get_values": object(),
+            "google_whoami": object(),
+        }
+        removed = g.apply_suite("gmail", server)
+        self.assertEqual(set(server._tools), {"gmail_list_labels"})
+        self.assertEqual(removed, 4)
+        with self.assertRaises(ValueError):
+            g.apply_suite("all", server)
+
+
 if __name__ == "__main__":
     unittest.main()

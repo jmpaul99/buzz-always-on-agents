@@ -460,5 +460,27 @@ class CloudRuntimeTest(unittest.TestCase):
         self.assertFalse(row["is_active"])
 
 
+class GcpTargetTest(unittest.TestCase):
+    def test_skips_placeholder_and_uses_file_env(self):
+        project, zone, instance = au.resolve_gcp_target(
+            {"BUZZ_GCP_PROJECT": "your-gcp-project", "GCP_ZONE": "us-west1-b"},
+            {"GCP_PROJECT": "shining-env-506518-s3", "LISTENER_INSTANCE": "buzz-listener"},
+            "ignored-because-file-has-project",
+        )
+        self.assertEqual(project, "shining-env-506518-s3")
+        self.assertEqual(zone, "us-west1-b")
+        self.assertEqual(instance, "buzz-listener")
+
+    def test_falls_back_to_gcloud_when_env_is_placeholder(self):
+        project, zone, instance = au.resolve_gcp_target(
+            {"BUZZ_GCP_PROJECT": "your-gcp-project"},
+            {},
+            "from-gcloud",
+        )
+        self.assertEqual(project, "from-gcloud")
+        self.assertEqual(zone, "us-central1-a")
+        self.assertEqual(instance, "buzz-listener")
+
+
 if __name__ == "__main__":
     unittest.main()

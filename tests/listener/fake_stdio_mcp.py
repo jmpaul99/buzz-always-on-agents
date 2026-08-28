@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal newline JSON-RPC MCP server for multiplexer tests."""
+"""Minimal Content-Length JSON-RPC MCP server for multiplexer tests."""
 from __future__ import annotations
 
 import argparse
@@ -35,7 +35,8 @@ def read_msg() -> dict | None:
 
 
 def write_msg(msg: dict) -> None:
-    sys.stdout.buffer.write((json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8"))
+    body = json.dumps(msg, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
     sys.stdout.buffer.flush()
 
 
@@ -43,7 +44,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", default="fake")
     parser.add_argument("--tool", default="echo")
+    parser.add_argument("--count", type=int, default=1)
     args = parser.parse_args()
+    if args.count <= 1:
+        tool_names = [args.tool]
+    else:
+        tool_names = [f"{args.tool}{i:02d}" for i in range(args.count)]
     while True:
         msg = read_msg()
         if msg is None:
@@ -73,13 +79,14 @@ def main() -> int:
                     "result": {
                         "tools": [
                             {
-                                "name": args.tool,
-                                "description": f"{args.name} {args.tool}",
+                                "name": tool_name,
+                                "description": f"{args.name} {tool_name}",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {"text": {"type": "string"}},
                                 },
                             }
+                            for tool_name in tool_names
                         ]
                     },
                 }

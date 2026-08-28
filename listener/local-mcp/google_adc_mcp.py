@@ -1114,5 +1114,43 @@ def sheets_fill_colors(spreadsheet_id: str, ranges_json: str) -> str:
         return _err(exc) if isinstance(exc, HttpError) else str(exc)
 
 
+SUITES = ("gmail", "drive", "calendar", "sheets")
+
+
+def _tool_bags(server: Any) -> list[dict[str, Any]]:
+    bags: list[dict[str, Any]] = []
+    for attr in ("_tools", "tools"):
+        val = getattr(server, attr, None)
+        if isinstance(val, dict):
+            bags.append(val)
+    manager = getattr(server, "_tool_manager", None)
+    if manager is not None:
+        val = getattr(manager, "_tools", None)
+        if isinstance(val, dict):
+            bags.append(val)
+    return bags
+
+
+def apply_suite(suite: str, server: Any | None = None) -> int:
+    """Keep one product suite of tools; return how many were removed."""
+    name = (suite or "gmail").strip().lower()
+    if name not in SUITES:
+        raise ValueError(f"suite must be one of {SUITES}")
+    prefix = name + "_"
+    removed = 0
+    for bag in _tool_bags(server if server is not None else mcp):
+        for tool_name in list(bag):
+            if not str(tool_name).startswith(prefix):
+                bag.pop(tool_name, None)
+                removed += 1
+    return removed
+
+
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--suite", default="gmail", choices=SUITES)
+    ns = parser.parse_args()
+    apply_suite(ns.suite)
     mcp.run()

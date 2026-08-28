@@ -38,8 +38,8 @@ Do not open `0.0.0.0/0:22`. The control API binds `0.0.0.0:8743`, but the firewa
 
 1. `buzz-acp@<slug>` AUTH (NIP-42) on the agent's WSS and builds the native standing prompt (core / huddle / canvas / thread-or-DM).
 2. Public/stream channels require a `#p` mention. DMs do not. A message that `#p`-tags several agents wakes **each** of them (one systemd unit per nsec).
-3. buzz-acp prompts `buzz-agent` over ACP. Desktop Agent Activity is `session/update` (thoughts, tool cards). LLM token SSE is off (`buzz-agent` hardcodes `stream: false`).
-4. Channel delivery is the native prompt plus `BUZZ_AGENT_REQUIRE_REPLY=1`. The agent posts with `buzz messages send`. Phone users only see channel posts; Desktop also sees ACP Activity.
+3. buzz-acp prompts stock `buzz-agent` over ACP. Desktop Agent Activity comes from encrypted relay observer frames (`BUZZ_ACP_RELAY_OBSERVER=true`), the same native path Desktop uses for remote agents. LLM token SSE is off (`buzz-agent` hardcodes `stream: false`).
+4. Channel delivery is the native prompt plus `BUZZ_AGENT_REQUIRE_REPLY=1` and the multiplexer `_Stop` hook (`MCP_HOOK_SERVERS=*`). The agent posts with `run-mcp__shell` running `buzz messages send` (bare `shell` is unknown). Phone users only see channel posts; Desktop also sees ACP Activity from the relay.
 
 Schedules are ordinary Buzz YAML `on: schedule` posts that `@` an agent.
 

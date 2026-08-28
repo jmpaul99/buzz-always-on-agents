@@ -11,8 +11,9 @@ WorkingDirectory=/var/lib/buzz-listener
 EnvironmentFile=-/etc/buzz/_runtime.env
 EnvironmentFile=/etc/buzz/%i.env
 Environment=PYTHONUNBUFFERED=1
+Environment=RUST_LOG=info,buzz_acp=info
 ExecStart=/opt/buzz-listener/run-acp.sh %i
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]

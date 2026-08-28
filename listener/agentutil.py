@@ -182,6 +182,49 @@ def load_env_file(path: pathlib.Path) -> dict[str, str]:
     return out
 
 
+GCP_PLACEHOLDER = "your-gcp-project"
+
+
+def _first_gcp_value(*values: str) -> str:
+    for raw in values:
+        text = (raw or "").strip()
+        if text and text not in {"-", GCP_PLACEHOLDER, "(unset)"}:
+            return text
+    return ""
+
+
+def resolve_gcp_target(
+    environ: dict[str, str] | None = None,
+    file_env: dict[str, str] | None = None,
+    gcloud_project: str = "",
+) -> tuple[str, str, str]:
+    """project, zone, instance for IAP. Skip the install placeholder."""
+    environ = environ or {}
+    file_env = file_env or {}
+    project = _first_gcp_value(
+        environ.get("BUZZ_GCP_PROJECT", ""),
+        environ.get("GCP_PROJECT", ""),
+        environ.get("GOOGLE_CLOUD_PROJECT", ""),
+        file_env.get("BUZZ_GCP_PROJECT", ""),
+        file_env.get("GCP_PROJECT", ""),
+        file_env.get("GOOGLE_CLOUD_PROJECT", ""),
+        gcloud_project,
+    ) or GCP_PLACEHOLDER
+    zone = _first_gcp_value(
+        environ.get("BUZZ_GCP_ZONE", ""),
+        environ.get("GCP_ZONE", ""),
+        file_env.get("BUZZ_GCP_ZONE", ""),
+        file_env.get("GCP_ZONE", ""),
+    ) or "us-central1-a"
+    instance = _first_gcp_value(
+        environ.get("BUZZ_GCP_INSTANCE", ""),
+        environ.get("LISTENER_INSTANCE", ""),
+        file_env.get("BUZZ_GCP_INSTANCE", ""),
+        file_env.get("LISTENER_INSTANCE", ""),
+    ) or "buzz-listener"
+    return project, zone, instance
+
+
 def parse_auth_tags(raw: str) -> list:
     raw = (raw or "").strip()
     if not raw:

@@ -61,19 +61,19 @@ Sidecar PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_pr
 
 **Dropped:** `playwright`, `chromedevtools`, `goosedocs`. No Chromium on the micro.
 
-**Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled** in the committed catalog. Do not flip `enabled: true` there (LiteLLM keyword merge skips enabled extras). Agents call `mcp_list` / `mcp_enable` / `mcp_disable` / `mcp_register`. Enablement is **per agent**, cap **2** extras (`MAX_ENABLED`), persisted in `/var/lib/buzz-listener/agents/<slug>/mcp-enabled.json`. `mcp_register` appends `/etc/buzz/_mcp-overlay.json` (survives listener redeploy; the shipped catalog is overwritten). Extra tool names are `{slug}__{tool}`. Tools from a new enable are guaranteed on the **next** mention.
+**Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled** in the committed catalog. Do not flip `enabled: true` there (LiteLLM keyword merge skips enabled extras). Agents call `mcp_list` / `mcp_enable` / `mcp_disable` / `mcp_register` / `mcp_tools`. Enablement is **per agent**, cap **2** extras (`MAX_ENABLED`; always-on is not in the cap), persisted in `/var/lib/buzz-listener/agents/<slug>/mcp-enabled.json` **only after spawn succeeds**. Failed extras are unpinned and show `status: failed` plus `last_error`. `mcp_register` appends `/etc/buzz/_mcp-overlay.json` (survives listener redeploy; the shipped catalog is overwritten). Extra tool names are `{slug}_{tool}` (a single underscore — buzz-agent rejects bare names containing `__`). `mcp_enable` spawns in the background so `shell` / `buzz messages send` still work this turn. `tools/list` advertises manager + always-on + one extra page (12); off-page extra names stay callable. `mcp_tools` pages the rest. Extra tokens are not in `shell` env.
 
-HTTP GitHub/Stripe use `npx mcp-remote`. Node.js and `uv` are installed on the micro so those spawn specs can run. Google Workspace spawn spec is [`local-mcp/`](local-mcp/README.md). Overlay slugs do **not** update Cloud Run COMPLEX keywords until the next LiteLLM image build (keywords come from the committed catalog only).
+HTTP Stripe/containeruse use `npx mcp-remote` and need a current Node LTS (undici). GitHub is the official `github-mcp-server` binary (`stdio`, `GITHUB_TOOLSETS=repos`). Node.js 24 LTS and `uv` are installed on the micro so those spawn specs can run. Google Workspace spawn spec is [`local-mcp/`](local-mcp/README.md) with `--suite gmail` by default. Overlay slugs do **not** update Cloud Run COMPLEX keywords until the next LiteLLM image build (keywords come from the committed catalog only).
 
-Spawn follows the same trusted/untrusted boundary as [block/buzz#6651](https://github.com/block/buzz/pull/6651): only the proxied `buzz-dev-mcp` child receives `BUZZ_PRIVATE_KEY` / `BUZZ_RELAY_URL` / `BUZZ_AUTH_TAG`. Extras get declared API keys only. Child start failures fail closed and do not echo argv (commands may embed keys). This repo cannot use `BUZZ_ACP_EXTRA_MCP_COMMANDS` until that PR is in `sprig-latest`.
+Spawn follows the same trusted/untrusted boundary as [block/buzz#6651](https://github.com/block/buzz/pull/6651): `buzz-agent` only forwards Buzz identity into the multiplexer; extra keys (`GITHUB_PERSONAL_ACCESS_TOKEN`, `GOOGLE_CLOUD_PROJECT`, …) are reloaded from `/etc/buzz/_runtime.env`. Only the proxied `buzz-dev-mcp` child receives `BUZZ_PRIVATE_KEY` / `BUZZ_RELAY_URL` / `BUZZ_AUTH_TAG`. Extras get declared API keys only. Child start failures fail closed and do not echo argv (commands may embed keys). This repo cannot use `BUZZ_ACP_EXTRA_MCP_COMMANDS` until that PR is in `sprig-latest`.
 
 A short skill is copied to `$WORKSPACE/agents/<slug>/.agents/skills/mcp-manager/SKILL.md` on `buzz-acp@` start.
 
 ## LiteLLM
 
-`buzz-agent` uses `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_*` against `http://127.0.0.1:4000/v1` (`model=goose`, `OPENAI_COMPAT_API=chat`). The proxy mints a GCE identity token and forwards a buffered JSON body (`Content-Length`). `buzz-agent` hardcodes `stream: false`; ACP `session/update` still streams to Desktop Agent Activity per tool round.
+`buzz-agent` uses `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_*` against `http://127.0.0.1:4000/v1` (`model=goose`, `OPENAI_COMPAT_API=chat`). The proxy mints a GCE identity token and forwards a buffered JSON body (`Content-Length`). `buzz-agent` hardcodes `stream: false`. Desktop Agent Activity is the native relay observer (`BUZZ_ACP_RELAY_OBSERVER=true` in `run-acp.sh`, matching Desktop remote `launch.policy_env`), not a local ACP stdio wrap.
 
-`BUZZ_AGENT_REQUIRE_REPLY=1` so the model posts with `buzz messages send` instead of ending silent.
+`BUZZ_AGENT_REQUIRE_REPLY=1` so a turn with no `buzz messages send` / `reactions add` gets a reminder. `MCP_HOOK_SERVERS=*` so the multiplexer `_Stop` hook can object with the exact tool name (`run-mcp__shell` — bare `shell` is unknown). ACP Activity is not a channel post; `run-acp.sh` prepends that to the system prompt.
 
 ## systemd
 
@@ -96,14 +96,14 @@ sudo /opt/buzz-listener/remove-agent.sh <slug>
 | File | Role |
 | --- | --- |
 | `listener.py` | Control API; starts/stops `buzz-acp@` on PUT/DELETE |
-| `run-acp.sh` | Env mapping then `exec buzz-acp` |
+| `run-acp.sh` | Env mapping then `exec buzz-acp` (stock `buzz-agent`) |
 | `run-mcp.sh` | Stdio multiplexer (`mcp_manager.py`) |
 | `litellm_proxy.py` | Localhost IAM proxy to Cloud Run LiteLLM |
 | `cloud_agents.py` | Chat confirm create/update (`buzz-cloud-agents`) |
 | `agentutil.py` | Env records, permissions, Desktop merge helpers |
 | `nostrutil.py` | nsec decode, schnorr sign |
 | `mcp_catalog.py` / `mcp-catalog.json` | Shipped always-on + extras; overlay merge; enable-set helpers |
-| `local-mcp/mcp_manager.py` | Proxies `buzz-dev-mcp`; list/enable/disable/register extras |
+| `local-mcp/mcp_manager.py` | Proxies `buzz-dev-mcp`; list/enable/disable/register/page extras |
 | `local-mcp/google_adc_mcp.py` | Optional Google Workspace extra (`googleadc`) |
 | `skills/mcp-manager/SKILL.md` | Copied into each agent cwd for `load_skill` |
 
@@ -129,4 +129,4 @@ From the repo root:
 python -m unittest discover -s tests/listener
 ```
 
-No GCP. `test_agentutil.py` covers Desktop compact/merge and multi-Desktop roster import/delete. `test_control.py` covers sidecar vs apply tokens. `test_mcp_catalog.py` asserts no browser slugs, disabled extras, overlay merge, and register guards. `test_mcp_manager.py` drives a fake stdio child for list/enable/disable/register.
+No GCP. `test_agentutil.py` covers Desktop compact/merge and multi-Desktop roster import/delete. `test_control.py` covers sidecar vs apply tokens. `test_mcp_catalog.py` asserts no browser slugs, disabled extras, overlay merge, register guards, and extra paging. `test_mcp_manager.py` drives a fake stdio child for list/enable/disable/register, always-on pinning, and extra tool pages.

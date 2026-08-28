@@ -74,10 +74,21 @@ $remote = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates tar nodejs npm
+apt-get install -y -qq curl ca-certificates gnupg
+if ! node -v 2>/dev/null | grep -q '^v24\.'; then
+  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+fi
+apt-get install -y -qq python3 python3-venv python3-pip tar nodejs
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 fi
+curl -fsSL -o /tmp/github-mcp-server.tgz \
+  https://github.com/github/github-mcp-server/releases/latest/download/github-mcp-server_Linux_x86_64.tar.gz
+rm -rf /tmp/github-mcp-unpack && mkdir -p /tmp/github-mcp-unpack
+tar -xzf /tmp/github-mcp-server.tgz -C /tmp/github-mcp-unpack
+GHBIN=$(find /tmp/github-mcp-unpack -type f -name github-mcp-server | head -n1)
+install -m 755 "$GHBIN" /usr/local/bin/github-mcp-server
+rm -rf /tmp/github-mcp-server.tgz /tmp/github-mcp-unpack
 install -d -m 755 /opt/buzz-listener /var/lib/buzz-listener /opt/sprig /opt/buzz/local-mcp /opt/buzz-listener/skills/mcp-manager
 install -d -m 700 /etc/buzz
 cp /tmp/buzz-listener-src/*.py /tmp/buzz-listener-src/requirements.txt /tmp/buzz-listener-src/mcp-catalog.json /opt/buzz-listener/
@@ -93,6 +104,7 @@ fi
 install -m 755 /tmp/buzz-listener-src/add-agent.sh /opt/buzz-listener/add-agent.sh
 install -m 755 /tmp/buzz-listener-src/remove-agent.sh /opt/buzz-listener/remove-agent.sh
 install -m 755 /tmp/buzz-listener-src/run-acp.sh /opt/buzz-listener/run-acp.sh
+rm -f /opt/buzz-listener/run-agent.sh /opt/buzz-listener/acp_user_echo.py
 install -m 755 /tmp/buzz-listener-src/run-mcp.sh /opt/buzz-listener/run-mcp.sh
 install -m 755 /tmp/buzz-listener-src/keepalive.sh /opt/buzz-listener/keepalive.sh
 sed -i 's/\r$//' /opt/buzz-listener/*.sh /opt/buzz-listener/cloud_agents.py
@@ -156,9 +168,16 @@ $runtime = @(
     "OPENAI_COMPAT_MODEL=goose",
     "OPENAI_COMPAT_API=chat",
     "BUZZ_AGENT_REQUIRE_REPLY=1",
+    "MCP_HOOK_SERVERS=*",
     "BUZZ_ACP_AGENT_COMMAND=buzz-agent",
     "BUZZ_ACP_AGENT_ARGS=",
     "BUZZ_ACP_MCP_COMMAND=/opt/buzz-listener/run-mcp.sh",
+    "BUZZ_ACP_RELAY_OBSERVER=true",
+    "BUZZ_ACP_LAZY_POOL=true",
+    "BUZZ_ACP_IDLE_POOL_SLEEP=900",
+    "BUZZ_ACP_AGENTS=1",
+    "RUST_LOG=info,buzz_acp=info",
+    "LITELLM_PROXY_TIMEOUT_SECS=300",
     "LISTENER_CONTROL_URL=http://127.0.0.1:8743",
     "APPLY_SA=$sa",
     "BUZZ_WORKSPACE=/var/lib/buzz-listener",

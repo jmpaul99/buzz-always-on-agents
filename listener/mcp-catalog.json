@@ -16,9 +16,10 @@
       "enabled": false,
       "name": "GitHub",
       "display_name": "GitHub",
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://api.githubcopilot.com/mcp/"],
-      "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+      "command": "github-mcp-server",
+      "args": ["stdio"],
+      "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+      "env": {"GITHUB_TOOLSETS": "repos"}
     },
     {
       "slug": "stripe",
@@ -51,7 +52,9 @@
         "--with", "google-auth",
         "--with", "google-auth-httplib2",
         "python",
-        "/opt/buzz/local-mcp/google_adc_mcp.py"
+        "/opt/buzz/local-mcp/google_adc_mcp.py",
+        "--suite",
+        "gmail"
       ],
       "env_keys": ["GOOGLE_CLOUD_PROJECT"]
     },

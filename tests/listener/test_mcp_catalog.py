@@ -44,16 +44,20 @@ class McpCatalogTest(unittest.TestCase):
 
     def test_http_extras_use_mcp_remote(self):
         by_slug = {item["slug"]: item for item in mcp_catalog.entries(self.catalog, "extras")}
-        self.assertEqual(by_slug["github"]["command"], "npx")
-        self.assertIn("mcp-remote", by_slug["github"]["args"])
-        self.assertIn("mcp-remote", by_slug["stripe"]["args"])
+        self.assertEqual(by_slug["github"]["command"], "github-mcp-server")
+        self.assertEqual(by_slug["github"]["args"], ["stdio"])
+        self.assertEqual(by_slug["github"]["env"]["GITHUB_TOOLSETS"], "repos")
         self.assertIn("GITHUB_PERSONAL_ACCESS_TOKEN", by_slug["github"]["env_keys"])
+        self.assertEqual(by_slug["stripe"]["command"], "npx")
+        self.assertIn("mcp-remote", by_slug["stripe"]["args"])
         self.assertIn("STRIPE_API_KEY", by_slug["stripe"]["env_keys"])
 
     def test_googleadc_points_at_vm_path_and_repo_source(self):
         by_slug = {item["slug"]: item for item in mcp_catalog.entries(self.catalog, "extras")}
         adc = by_slug["googleadc"]
         self.assertIn("/opt/buzz/local-mcp/google_adc_mcp.py", adc["args"])
+        self.assertIn("--suite", adc["args"])
+        self.assertIn("gmail", adc["args"])
         src = Path(__file__).resolve().parents[2] / "listener" / "local-mcp" / "google_adc_mcp.py"
         self.assertTrue(src.is_file())
 
@@ -86,7 +90,7 @@ class OverlayAndEnabledTest(unittest.TestCase):
         merged = mcp_catalog.merge_extras(self.catalog, overlay)
         by_slug = {item["slug"]: item for item in merged}
         self.assertEqual(by_slug["github"]["_source"], "catalog")
-        self.assertIn("mcp-remote", by_slug["github"]["args"])
+        self.assertEqual(by_slug["github"]["command"], "github-mcp-server")
         self.assertEqual(by_slug["custommcp"]["_source"], "overlay")
 
     def test_register_rejects_banned_unknown_command_and_missing_env(self):
@@ -195,6 +199,25 @@ class OverlayAndEnabledTest(unittest.TestCase):
         self.assertNotIn("OPENAI_COMPAT_API_KEY", extra)
         self.assertNotIn("BUZZ_SYNC_TOKEN", extra)
 
+        github = mcp_catalog.extra_child_env(
+            {
+                "env_keys": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+                "env": {"GITHUB_TOOLSETS": "repos", "BUZZ_PRIVATE_KEY": "nsec1nope"},
+            },
+            parent,
+        )
+        self.assertEqual(github["GITHUB_PERSONAL_ACCESS_TOKEN"], "ghs_x")
+        self.assertEqual(github["GITHUB_TOOLSETS"], "repos")
+        self.assertNotIn("BUZZ_PRIVATE_KEY", github)
+
+        self.assertEqual(
+            mcp_catalog.expand_args(
+                ["--header", "Authorization:Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"],
+                parent,
+            )[1],
+            "Authorization:Bearer ghs_x",
+        )
+
         trusted = mcp_catalog.child_env([], parent, trusted=True)
         self.assertEqual(trusted["BUZZ_PRIVATE_KEY"], "nsec1secret")
         self.assertEqual(trusted["BUZZ_RELAY_URL"], "wss://example.communities.buzz.xyz")
@@ -204,10 +227,65 @@ class OverlayAndEnabledTest(unittest.TestCase):
         self.assertNotIn("GITHUB_PERSONAL_ACCESS_TOKEN", trusted)
 
     def test_tool_prefix(self):
-        self.assertEqual(mcp_catalog.extra_tool_name("github", "search"), "github__search")
-        self.assertEqual(mcp_catalog.split_extra_tool("github__search", ["github", "stripe"]), ("github", "search"))
+        self.assertEqual(mcp_catalog.extra_tool_name("github", "search"), "github_search")
+        self.assertNotIn("__", mcp_catalog.extra_tool_name("github", "search"))
+        self.assertEqual(mcp_catalog.split_extra_tool("github_search", ["github", "stripe"]), ("github", "search"))
+        self.assertEqual(
+            mcp_catalog.split_extra_tool("googleadc_gmail_search_threads", ["googleadc"]),
+            ("googleadc", "gmail_search_threads"),
+        )
         self.assertIsNone(mcp_catalog.split_extra_tool("shell", ["github"]))
 
+    def test_fill_missing_from_runtime_skips_identity(self):
+        runtime = self.root / "_runtime.env"
+        runtime.write_text(
+            "\n".join(
+                [
+                    "GITHUB_PERSONAL_ACCESS_TOKEN=ghs_from_file",
+                    "GOOGLE_CLOUD_PROJECT=proj-from-file",
+                    "TAVILY_API_KEY=tvly_from_file",
+                    "BUZZ_PRIVATE_KEY=nsec1shouldnotcopy",
+                    "LITELLM_MASTER_KEY=sk-shouldnotcopy",
+                    "BUZZ_WORKSPACE=/var/lib/buzz-listener",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        filled = mcp_catalog.fill_missing_from_runtime(
+            {
+                "PATH": "/usr/bin",
+                "BUZZ_PRIVATE_KEY": "nsec1already",
+                "PWD": str(self.root / "workspace" / "agents" / "fizz"),
+            },
+            runtime,
+        )
+        self.assertEqual(filled["GITHUB_PERSONAL_ACCESS_TOKEN"], "ghs_from_file")
+        self.assertEqual(filled["GOOGLE_CLOUD_PROJECT"], "proj-from-file")
+        self.assertEqual(filled["TAVILY_API_KEY"], "tvly_from_file")
+        self.assertEqual(filled["BUZZ_WORKSPACE"], "/var/lib/buzz-listener")
+        self.assertEqual(filled["BUZZ_PRIVATE_KEY"], "nsec1already")
+        self.assertNotIn("LITELLM_MASTER_KEY", filled)
+        self.assertEqual(filled["AGENT_NAME"], "fizz")
+        already = mcp_catalog.fill_missing_from_runtime(
+            {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghs_keep", "AGENT_NAME": "honey"},
+            runtime,
+        )
+        self.assertEqual(already["GITHUB_PERSONAL_ACCESS_TOKEN"], "ghs_keep")
+        self.assertEqual(already["AGENT_NAME"], "honey")
+
+    def test_page_tools(self):
+        tools = [{"name": f"t{i}"} for i in range(30)]
+        page, nxt = mcp_catalog.page_tools(tools, "0")
+        self.assertEqual(len(page), 12)
+        self.assertEqual(page[0]["name"], "t0")
+        self.assertEqual(nxt, "12")
+        page2, nxt2 = mcp_catalog.page_tools(tools, nxt)
+        self.assertEqual(page2[0]["name"], "t12")
+        self.assertEqual(nxt2, "24")
+        page3, nxt3 = mcp_catalog.page_tools(tools, nxt2)
+        self.assertEqual(len(page3), 6)
+        self.assertIsNone(nxt3)
 
 
 if __name__ == "__main__":

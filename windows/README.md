@@ -20,7 +20,7 @@ Then **restart Buzz Desktop**. New agents: **Run on → cloud**. If create still
 2. Copies `listener/agentutil.py` and `buzz-cloud-sync.py` next to it (`buzz_cloud_sync.py`).
 3. Compiles `buzz-backend-cloud.cs` with `csc.exe` into `%USERPROFILE%\.local\bin\buzz-backend-cloud.exe`, baking in the Python path and extra PATH (Python dir, `.local\bin`, Cloud SDK).
 4. Adds `.local\bin` to the **user** PATH if needed.
-5. Registers hidden logon task `BuzzCloudSync` (`pythonw`, `IgnoreNew`, no time limit) and starts it.
+5. Registers hidden logon task `BuzzCloudSync` (`pythonw`, `IgnoreNew`, restart on failure, no time limit) and starts it. Writes `%USERPROFILE%\.local\bin\buzz-cloud.env` so the sidecar IAP tunnel uses the repo GCP project even when `BUZZ_GCP_PROJECT` is unset in the session.
 6. Kills leftover sync/IAP/PuTTY 8743 processes so only one sidecar remains.
 
 Do **not** put this `windows\` folder on PATH. `buzz-backend-cloud.cmd` is a source-tree helper only; Desktop copies PATH plugins to `%TEMP%\buzz-provider-*\provider.exe` and `CreateProcess` that copy — a `.cmd` becomes “Unsupported 16-Bit Application”.
@@ -64,9 +64,9 @@ Logs: `%APPDATA%\xyz.block.buzz.app\agents\cloud-sync.log`. State: `cloud-sync-s
 | --- | --- |
 | Create / delete (this Desktop and other sidecars) | Memories, canvas, huddle, thread (relay; buzz-acp fetches via `buzz`) |
 | `system_prompt`, team instruction text | Channel membership (Block relay) |
-| `respond_to`, allowlist, `channel_allowlist` | `is_active`, `runtime_pid`, start/stop timestamps |
+| `respond_to`, allowlist, `channel_allowlist` | `runtime_pid`, start/stop timestamps |
 | `team_id`, display name, relay URL | Phone Buzz |
-| Card overwritten to cloud LiteLLM (`model=goose`, `provider=litellm`) | Switching Run on → this computer is reverted next sidecar cycle |
+| Cloud LiteLLM (`model=goose`, `provider=litellm`); `is_active=false` and harness cleared on every persist so Desktop cannot steal the nsec | |
 
 Deleting a Desktop card undeploys the GCP agent **and** removes the card on other Desktops. Stopping the card does **not**. Imported cards arrive as **Run on → cloud** and stopped.
 
