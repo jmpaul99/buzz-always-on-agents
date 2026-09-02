@@ -44,14 +44,8 @@
       "enabled": false,
       "name": "Google Workspace",
       "display_name": "Google Workspace",
-      "command": "uv",
+      "command": "python3",
       "args": [
-        "run",
-        "--with", "mcp>=2",
-        "--with", "google-api-python-client",
-        "--with", "google-auth",
-        "--with", "google-auth-httplib2",
-        "python",
         "/opt/buzz/local-mcp/google_adc_mcp.py",
         "--suite",
         "gmail"

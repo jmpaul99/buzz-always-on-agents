@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "listener"))
 
@@ -248,6 +250,7 @@ class RecordTests(unittest.TestCase):
         self.assertIn("id", row)
         self.assertEqual(row["channel_allowlist"], ["chan-1"])
         self.assertEqual(row["backend_agent_id"], "fizz")
+        self.assertEqual(row["turn_timeout_seconds"], 320)
 
     def test_apply_cloud_roster_import_update_delete_keeps_draft(self):
         existing = {
@@ -458,6 +461,61 @@ class CloudRuntimeTest(unittest.TestCase):
         self.assertEqual(row["model"], "goose")
         self.assertEqual(row["provider"], "litellm")
         self.assertFalse(row["is_active"])
+        self.assertEqual(row["turn_timeout_seconds"], 320)
+        self.assertEqual(row["parallelism"], 1)
+        self.assertFalse(row["is_builtin"])
+
+    def test_ensure_desktop_card_fields_does_not_clobber(self):
+        row = {"turn_timeout_seconds": 99, "is_builtin": True}
+        self.assertTrue(au.ensure_desktop_card_fields(row))
+        self.assertEqual(row["turn_timeout_seconds"], 99)
+        self.assertTrue(row["is_builtin"])
+        self.assertEqual(row["parallelism"], 10)
+        self.assertFalse(au.ensure_desktop_card_fields(row))
+
+
+class JsonStoreTests(unittest.TestCase):
+    def test_atomic_write_round_trip_and_unique_tmp(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "managed-agents.json"
+            shared = Path(raw) / "managed-agents.tmp"
+            shared.write_text("desktop-tmp", encoding="utf-8")
+            au.atomic_write_text(path, json.dumps([{"ok": True}], indent=2))
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), [{"ok": True}])
+            self.assertEqual(shared.read_text(encoding="utf-8"), "desktop-tmp")
+            self.assertEqual(list(Path(raw).glob("managed-agents.json.*.tmp")), [])
+
+    def test_atomic_write_in_place_when_replace_denied(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "managed-agents.json"
+            path.write_bytes(b"")
+            real_replace = os.replace
+
+            def boom(src, dst, *args, **kwargs):
+                if Path(dst) == path:
+                    raise PermissionError(13, "Access is denied")
+                return real_replace(src, dst, *args, **kwargs)
+
+            with mock.patch("os.replace", side_effect=boom):
+                au.atomic_write_text(path, '[{"ok": true}]')
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), [{"ok": True}])
+            self.assertEqual(list(Path(raw).glob("managed-agents.json.*.tmp")), [])
+
+    def test_read_json_recovers_from_tmp_when_live_file_empty(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "managed-agents.json"
+            path.write_bytes(b"")
+            (Path(raw) / "managed-agents.tmp").write_text(
+                json.dumps([{"pubkey": "a" * 64}]), encoding="utf-8"
+            )
+            self.assertEqual(au.read_json_file(path, []), [{"pubkey": "a" * 64}])
+
+    def test_read_json_prefers_live_file_when_valid(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "managed-agents.json"
+            path.write_text("[]", encoding="utf-8")
+            (Path(raw) / "managed-agents.tmp").write_text("[1]", encoding="utf-8")
+            self.assertEqual(au.read_json_file(path, None), [])
 
 
 class GcpTargetTest(unittest.TestCase):

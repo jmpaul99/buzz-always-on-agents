@@ -136,8 +136,8 @@ class SuiteTests(unittest.TestCase):
             "google_whoami": object(),
         }
         removed = g.apply_suite("gmail", server)
-        self.assertEqual(set(server._tools), {"gmail_list_labels"})
-        self.assertEqual(removed, 4)
+        self.assertEqual(set(server._tools), {"gmail_list_labels", "google_whoami"})
+        self.assertEqual(removed, 3)
         with self.assertRaises(ValueError):
             g.apply_suite("all", server)
 

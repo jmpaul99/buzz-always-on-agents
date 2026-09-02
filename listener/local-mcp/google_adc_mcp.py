@@ -1140,9 +1140,11 @@ def apply_suite(suite: str, server: Any | None = None) -> int:
     removed = 0
     for bag in _tool_bags(server if server is not None else mcp):
         for tool_name in list(bag):
-            if not str(tool_name).startswith(prefix):
-                bag.pop(tool_name, None)
-                removed += 1
+            raw = str(tool_name)
+            if raw.startswith(prefix) or raw.startswith("google_"):
+                continue
+            bag.pop(tool_name, None)
+            removed += 1
     return removed
 
 
@@ -1153,4 +1155,4 @@ if __name__ == "__main__":
     parser.add_argument("--suite", default="gmail", choices=SUITES)
     ns = parser.parse_args()
     apply_suite(ns.suite)
-    mcp.run()
+    mcp.run(transport="stdio")

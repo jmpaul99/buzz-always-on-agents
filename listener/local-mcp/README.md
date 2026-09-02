@@ -4,7 +4,7 @@ Optional stdio MCP for Gmail, Drive, Calendar, and Sheets using **gcloud Applica
 
 Gmail, Drive, and Calendar tools match Google's remote Workspace MCP servers (the same endpoints the [Gmail](https://github.com/cursor/plugins/tree/main/third_party/gmail), [Drive](https://github.com/cursor/plugins/tree/main/third_party/google-drive), and [Calendar](https://github.com/cursor/plugins/tree/main/third_party/google-calendar) Cursor plugins wrap). This process uses ADC instead of those HTTP MCP URLs because the listener VM has no browser for Google's OAuth prompt.
 
-`infra/deploy-listener.ps1` copies [`google_adc_mcp.py`](google_adc_mcp.py) to `/opt/buzz/local-mcp/google_adc_mcp.py`. Spawn: `uv run --with mcp --with google-api-python-client --with google-auth --with google-auth-httplib2 python /opt/buzz/local-mcp/google_adc_mcp.py --suite gmail`. `--suite` is `gmail` (default), `drive`, `calendar`, or `sheets` so the child starts with one product toolset. The multiplexer still pages extra tools (`mcp_tools`) so always-on `shell` stays visible.
+`infra/deploy-listener.ps1` copies [`google_adc_mcp.py`](google_adc_mcp.py) to `/opt/buzz/local-mcp/google_adc_mcp.py`. Spawn uses the listener venv (`python3 /opt/buzz/local-mcp/google_adc_mcp.py --suite gmail`) so `mcp_enable` does not cold-start `uv run --with` inside the 45s initialize handshake. `--suite` is `gmail` (default), `drive`, `calendar`, or `sheets` so the child starts with one product toolset. The multiplexer still pages extra tools (`mcp_tools`) so always-on `shell` stays visible.
 
 ## Credentials
 

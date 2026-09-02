@@ -109,6 +109,48 @@ class McpManagerTest(unittest.TestCase):
         framed.seek(0)
         self.assertEqual(mcp_manager.read_rpc(framed)["id"], 2)
 
+    def test_python3_extra_uses_manager_interpreter(self):
+        captured: dict[str, list[str]] = {}
+
+        class FakeProc:
+            def __init__(self):
+                self.stdin = None
+                self.stdout = None
+                self.stderr = None
+
+            def poll(self):
+                return None
+
+        def fake_popen(argv, **kwargs):
+            captured["argv"] = list(argv)
+            return FakeProc()
+
+        def fake_init(self, proc, timeout=45.0, framing="newline"):
+            self.proc = proc
+            self.timeout = timeout
+            self.framing = framing
+
+        def fake_initialize(self):
+            return {}
+
+        orig_popen = mcp_manager.subprocess.Popen
+        orig_init = mcp_manager.StdioMcpClient.__init__
+        orig_initialize = mcp_manager.StdioMcpClient.initialize
+        mcp_manager.subprocess.Popen = fake_popen
+        mcp_manager.StdioMcpClient.__init__ = fake_init
+        mcp_manager.StdioMcpClient.initialize = fake_initialize
+        try:
+            mcp_manager.spawn_mcp(
+                {"command": "python3", "args": ["/opt/buzz/local-mcp/google_adc_mcp.py"]},
+                {"PATH": "/usr/bin"},
+            )
+        finally:
+            mcp_manager.subprocess.Popen = orig_popen
+            mcp_manager.StdioMcpClient.__init__ = orig_init
+            mcp_manager.StdioMcpClient.initialize = orig_initialize
+        self.assertEqual(captured["argv"][0], sys.executable)
+        self.assertEqual(captured["argv"][1], "/opt/buzz/local-mcp/google_adc_mcp.py")
+
     def test_list_enable_disable_prefix_and_no_secret_leak(self):
         self.manager.start()
         listed = json.loads(self.manager.call_tool("mcp_list", {})["content"][0]["text"])

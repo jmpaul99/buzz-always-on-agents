@@ -301,6 +301,115 @@ def write_env_file(path: pathlib.Path, fields: dict[str, str]) -> None:
         pass
 
 
+def _try_parse_json(path: pathlib.Path) -> tuple[Any, bool]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, False
+    if not raw.strip():
+        return None, False
+    try:
+        return json.loads(raw), True
+    except json.JSONDecodeError:
+        return None, False
+
+
+def read_json_file(path: pathlib.Path, default: Any = None) -> Any:
+    """Parse JSON at path. Empty/corrupt files fall back to a parseable sibling tmp.
+
+    Desktop and older sidecars share `stem.tmp` (e.g. managed-agents.tmp). Never treat
+    a 0-byte live file as an empty roster while a tmp still has valid JSON.
+    """
+    parsed, ok = _try_parse_json(path)
+    if ok:
+        return parsed
+    parent = path.parent
+    if not parent.is_dir():
+        return default
+    fallbacks: list[pathlib.Path] = []
+    shared = path.with_suffix(".tmp")
+    if shared.is_file():
+        fallbacks.append(shared)
+    try:
+        extras = sorted(
+            (p for p in parent.glob(path.name + ".*.tmp") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        extras = []
+    fallbacks.extend(extras)
+    for candidate in fallbacks:
+        parsed, ok = _try_parse_json(candidate)
+        if ok:
+            return parsed
+    return default
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    offset = 0
+    while offset < len(data):
+        offset += os.write(fd, data[offset:])
+
+
+def _write_in_place(path: pathlib.Path, data: bytes) -> None:
+    """Write then truncate so a crash cannot leave a 0-byte destination."""
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    fd = os.open(str(path), flags)
+    try:
+        _write_all(fd, data)
+        os.ftruncate(fd, len(data))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def atomic_write_text(
+    path: pathlib.Path,
+    text: str,
+    *,
+    encoding: str = "utf-8",
+    mode: int | None = None,
+) -> None:
+    """Write text without using Desktop's `stem.tmp` name, then replace.
+
+    On Windows, Buzz Desktop often holds managed-agents.json open, so os.replace
+    raises PermissionError. Fall back to in-place write-then-truncate.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = text.encode(encoding)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    fd = os.open(str(tmp), flags, 0o600 if mode is None else mode)
+    replaced = False
+    try:
+        try:
+            _write_all(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        if mode is not None:
+            try:
+                os.chmod(tmp, mode)
+            except OSError:
+                pass
+        try:
+            os.replace(str(tmp), str(path))
+            replaced = True
+        except OSError:
+            _write_in_place(path, data)
+    finally:
+        if not replaced:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
 def upsert_agent_files(
     agents_dir: pathlib.Path,
     *,
@@ -462,6 +571,46 @@ def apply_cloud_team_instructions(teams: list[dict[str, Any]], cloud_agents: lis
 CLOUD_MODEL = "goose"
 CLOUD_PROVIDER = "litellm"
 HARNESS_CLEAR = ("agent_command", "agent_command_override", "acp_command", "mcp_command")
+DEFAULT_TURN_TIMEOUT_SECONDS = 320
+DEFAULT_PARALLELISM = 1
+
+# Buzz Desktop serde requires these on every card. Fill only when missing.
+DESKTOP_CARD_DEFAULTS: dict[str, Any] = {
+    "turn_timeout_seconds": DEFAULT_TURN_TIMEOUT_SECONDS,
+    "idle_timeout_seconds": None,
+    "max_turn_duration_seconds": None,
+    "parallelism": DEFAULT_PARALLELISM,
+    "start_on_app_launch": False,
+    "auto_restart_on_config_change": True,
+    "is_builtin": False,
+    "provider_policy_pending": False,
+    "avatar_url": "",
+    "runtime_pid": None,
+    "last_started_at": None,
+    "last_stopped_at": None,
+    "last_exit_code": None,
+    "last_error": None,
+    "last_error_code": None,
+    "persona_id": None,
+    "persona_source_version": None,
+    "provider_binary_path": None,
+}
+
+
+def ensure_desktop_card_fields(row: dict[str, Any]) -> bool:
+    """Add Desktop-required fields without overwriting values already on the card."""
+    if not isinstance(row, dict):
+        return False
+    changed = False
+    defaults = dict(DESKTOP_CARD_DEFAULTS)
+    if row.get("is_builtin"):
+        defaults["parallelism"] = 10
+        defaults["is_builtin"] = True
+    for key, val in defaults.items():
+        if key not in row:
+            row[key] = val
+            changed = True
+    return changed
 
 
 def apply_cloud_runtime(row: dict[str, Any], slug: str, backend: dict[str, Any]) -> None:
@@ -474,6 +623,7 @@ def apply_cloud_runtime(row: dict[str, Any], slug: str, backend: dict[str, Any])
     row["model"] = CLOUD_MODEL
     row["provider"] = CLOUD_PROVIDER
     row["is_active"] = False
+    ensure_desktop_card_fields(row)
 
 
 def parse_loaded_agent(path: pathlib.Path, env: dict[str, str], pubkey: str) -> dict[str, Any]:
@@ -590,6 +740,7 @@ def desktop_row_from_cloud(cloud: dict[str, Any], *, template: dict[str, Any] | 
     }
     if "id" in template or not template:
         row["id"] = str(uuid.uuid4())
+    ensure_desktop_card_fields(row)
     return row
 
 

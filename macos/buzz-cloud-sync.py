@@ -311,20 +311,11 @@ def nsec_for(pubkey: str, blob: dict[str, Any], row: dict[str, Any] | None = Non
 
 
 def load_json(path: pathlib.Path, default: Any) -> Any:
-    if not path.is_file():
-        return default
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return default
+    return au.read_json_file(path, default)
 
 
 def save_json(path: pathlib.Path, data: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    au.atomic_write_text(path, json.dumps(data, indent=2), mode=0o600)
 
 
 def live_rows(records: list) -> dict[str, dict[str, Any]]:
@@ -681,13 +672,14 @@ def persist_records(path: pathlib.Path, records: list) -> None:
         for row in records:
             if isinstance(row, dict):
                 _stamp_cloud_runtime(row)
+                au.ensure_desktop_card_fields(row)
         text = json.dumps(records, indent=2)
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        tmp.replace(path)
+        try:
+            if path.is_file() and path.read_text(encoding="utf-8") == text:
+                return
+        except OSError:
+            pass
+        au.atomic_write_text(path, text)
         return
     save_json(path, records)
 
@@ -813,8 +805,9 @@ def watch_loop(once: bool) -> None:
                             pull(state, records)
                             persist_records(agents_path, records)
                         save_state(state)
-                    except Exception:
-                        log("pull failed")
+                    except Exception as exc:
+                        log(f"pull failed: {type(exc).__name__}: {exc}")
+                        traceback.print_exc()
                 time.sleep(0.4)
     finally:
         tunnel.stop()

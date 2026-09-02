@@ -301,13 +301,17 @@ def spawn_mcp(spec: dict[str, Any], env: dict[str, str]) -> StdioMcpClient:
     if not isinstance(args, list):
         args = []
     argv = [command, *mcp_catalog.expand_args([str(item) for item in args], env)]
-    resolved = shutil.which(command, path=env.get("PATH"))
-    if resolved:
-        argv[0] = resolved
-    elif command in {"python", "python3"}:
+    # python/python3 extras must use this process's interpreter (listener venv).
+    # shutil.which would pick /usr/bin/python3, which has no mcp/google deps, and
+    # uv run --with on an e2-micro exceeds the 45s initialize handshake.
+    if command in {"python", "python3"}:
         argv[0] = sys.executable
-    elif command == "github-mcp-server" and Path("/usr/local/bin/github-mcp-server").is_file():
-        argv[0] = "/usr/local/bin/github-mcp-server"
+    else:
+        resolved = shutil.which(command, path=env.get("PATH"))
+        if resolved:
+            argv[0] = resolved
+        elif command == "github-mcp-server" and Path("/usr/local/bin/github-mcp-server").is_file():
+            argv[0] = "/usr/local/bin/github-mcp-server"
     framing = str(spec.get("framing") or FRAME_NEWLINE)
     if framing not in {FRAME_NEWLINE, FRAME_CONTENT_LENGTH}:
         framing = FRAME_NEWLINE

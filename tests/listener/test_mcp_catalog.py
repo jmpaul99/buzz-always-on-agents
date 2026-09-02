@@ -55,9 +55,13 @@ class McpCatalogTest(unittest.TestCase):
     def test_googleadc_points_at_vm_path_and_repo_source(self):
         by_slug = {item["slug"]: item for item in mcp_catalog.entries(self.catalog, "extras")}
         adc = by_slug["googleadc"]
-        self.assertIn("/opt/buzz/local-mcp/google_adc_mcp.py", adc["args"])
-        self.assertIn("--suite", adc["args"])
-        self.assertIn("gmail", adc["args"])
+        self.assertEqual(adc["command"], "python3")
+        self.assertEqual(
+            adc["args"],
+            ["/opt/buzz/local-mcp/google_adc_mcp.py", "--suite", "gmail"],
+        )
+        self.assertNotIn("uv", adc["args"])
+        self.assertNotIn("--with", adc["args"])
         src = Path(__file__).resolve().parents[2] / "listener" / "local-mcp" / "google_adc_mcp.py"
         self.assertTrue(src.is_file())
 
