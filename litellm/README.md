@@ -1,12 +1,12 @@
 # LiteLLM router
 
-Cloud Run service `litellm-goose`. `buzz-agent` never talks to providers directly: the GCE sidecar (`listener/litellm_proxy.py`) forwards `127.0.0.1:4000` here with IAM + `LITELLM_MASTER_KEY`.
+Cloud Run service `litellm-cloud`. `buzz-agent` never talks to providers directly: the GCE sidecar (`listener/litellm_proxy.py`) forwards `127.0.0.1:4000` here with IAM + `LITELLM_MASTER_KEY`.
 
 Image: `ghcr.io/berriai/litellm:main-stable` plus this repo’s `config.yaml` after keyword merge. Built by [`infra/cloudbuild-litellm.yaml`](../infra/cloudbuild-litellm.yaml).
 
-## Virtual model `goose`
+## Virtual model `cloud`
 
-`buzz-agent` is configured with `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_MODEL=goose`. That alias is LiteLLM’s complexity auto-router (`auto_router/complexity_router`). The LLM classifier is **off**; routing is heuristic + keyword rules.
+`buzz-agent` is configured with `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_MODEL=cloud`. That alias is LiteLLM’s complexity auto-router (`auto_router/complexity_router`). The LLM classifier is **off**; routing is heuristic + keyword rules.
 
 | Tier | Models (order = preference / shuffle pool) |
 | --- | --- |
@@ -21,7 +21,7 @@ Keyword shortcuts:
 - COMPLEX: `refactor`, `implement`, `debug`, `traceback`, `compile`, `function`
 - REASONING: `step by step`, `reason`, `architecture`, `tradeoff`, `prove`
 
-Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed asks like “write a poem and react” stay MEDIUM. Token threshold `complex: 400`. Adaptive routing + session affinity (1h) are on. Default model: `groq-qwen` (`qwen3.6-27b`) so greetings still emit `buzz messages send`. SIMPLE stays on Groq/Gemini so it does not burn the shared NIM ~40 RPM wallet. `gemini-lite`, `groq-20b`, `openrouter-free`, and `openrouter-cheap` stay in `model_list` for manual curls but are **not** on the Goose fallback chain — they skip tool calls too often.
+Score 0 does **not** fall through to SIMPLE (`simple_medium: 0`) so short mixed asks like “write a poem and react” stay MEDIUM. Token threshold `complex: 400`. Adaptive routing + session affinity (1h) are on. Default model: `groq-qwen` (`qwen3.6-27b`) so greetings still emit `buzz messages send`. SIMPLE stays on Groq/Gemini so it does not burn the shared NIM ~40 RPM wallet. `gemini-lite`, `groq-20b`, `openrouter-free`, and `openrouter-cheap` stay in `model_list` for manual curls but are **not** on the complexity router fallback chain — they skip tool calls too often.
 
 `custom_technical_keywords` starts with Buzz/infra terms (`buzz`, `nostr`, `nsec`, `relay`, …). **Disabled MCP catalog extras are appended at image build** by `merge_extension_keywords.py` so adding an extra in `listener/mcp-catalog.json` automatically steers those mentions toward COMPLEX without a hand-maintained list.
 
@@ -72,12 +72,12 @@ python -m unittest discover -s tests/litellm
 ## Smoke (does not make the service public)
 
 ```powershell
-gcloud run services proxy litellm-goose --region us-central1 --project your-gcp-project
+gcloud run services proxy litellm-cloud --region us-central1 --project your-gcp-project
 # other terminal — include the master key header LiteLLM expects
 curl http://127.0.0.1:8080/v1/chat/completions ^
   -H "Authorization: Bearer $env:LITELLM_MASTER_KEY" ^
   -H "Content-Type: application/json" ^
-  -d "{\"model\":\"goose\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+  -d "{\"model\":\"cloud\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
 ```
 
 Timeout for completions is 240s (`router_settings.timeout`). `buzz-agent` uses `BUZZ_AGENT_LLM_TIMEOUT_SECS` (default 240).

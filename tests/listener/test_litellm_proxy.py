@@ -15,12 +15,12 @@ from litellm_proxy import _disable_stream  # noqa: E402
 
 class DisableStreamTest(unittest.TestCase):
     def test_forces_stream_false(self):
-        raw = json.dumps({"model": "goose", "stream": True, "messages": []}).encode()
+        raw = json.dumps({"model": "cloud", "stream": True, "messages": []}).encode()
         out = json.loads(_disable_stream(raw, "application/json"))
         self.assertFalse(out["stream"])
 
     def test_leaves_non_stream_payload(self):
-        raw = json.dumps({"model": "goose", "messages": []}).encode()
+        raw = json.dumps({"model": "cloud", "messages": []}).encode()
         self.assertEqual(_disable_stream(raw, "application/json"), raw)
 
 

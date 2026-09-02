@@ -71,7 +71,7 @@ Logs: `~/Library/Application Support/xyz.block.buzz.app/agents/cloud-sync.log`. 
 | `system_prompt`, team instruction text | Channel membership (Block relay) |
 | `respond_to`, allowlist, `channel_allowlist` | `is_active`, `runtime_pid`, start/stop timestamps |
 | `team_id`, display name, relay URL | Phone Buzz |
-| Card overwritten to cloud LiteLLM (`model=goose`, `provider=litellm`) | Switching Run on → this computer is reverted next sidecar cycle |
+| Card overwritten to cloud LiteLLM (`model=cloud`, `provider=litellm`) | Switching Run on → this computer is reverted next sidecar cycle |
 
 Deleting a Desktop card undeploys the GCP agent **and** removes the card on other Desktops. Stopping the card does **not**. Imported cards arrive as **Run on → cloud** and stopped.
 

@@ -1,4 +1,4 @@
-# Virtual model "goose" — LiteLLM v1.94+ complexity auto-router.
+# Virtual model "cloud" — LiteLLM v1.94+ complexity auto-router.
 # LLM classifier is off (heuristic + keyword rules). Classifier can be added later.
 
 model_list:
@@ -130,7 +130,7 @@ model_list:
       drop_params: true
     model_info:
       id: or-laguna-s
-  # Manual curls only — skip tools too often for Goose.
+  # Manual curls only — skip tools too often for the router.
   - model_name: openrouter-free
     litellm_params:
       model: openrouter/openrouter/free
@@ -150,8 +150,8 @@ model_list:
     model_info:
       id: openrouter-cheap
 
-  # --- Goose-facing alias ---
-  - model_name: goose
+  # --- buzz-agent-facing alias ---
+  - model_name: cloud
     litellm_params:
       model: auto_router/complexity_router
       drop_params: true
@@ -180,7 +180,7 @@ model_list:
         token_thresholds:
           simple: 0
           complex: 400
-        # Disabled Goose MCP names are appended at image build
+        # Disabled MCP extension slugs are appended at image build
         # (merge_extension_keywords.py) so routing stays extension-agnostic.
         custom_technical_keywords:
           [buzz, nostr, nsec, relay, systemd, aarch64, kubernetes, postgres]

@@ -66,7 +66,7 @@ def _info(_req: dict) -> dict:
         "name": NAME,
         "version": VERSION,
         "protocol_version": PROTOCOL_VERSION,
-        "description": "GCP e2-micro Buzz listener. Goose runs on Cloud Run, not on this Mac.",
+        "description": "GCP e2-micro Buzz listener. LiteLLM runs on Cloud Run, not on this Mac.",
         "config_schema": {
             "type": "object",
             "properties": {

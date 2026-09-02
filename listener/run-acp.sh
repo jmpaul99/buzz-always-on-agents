@@ -64,7 +64,7 @@ export BUZZ_ACP_AGENT_ARGS="${BUZZ_ACP_AGENT_ARGS:-}"
 export BUZZ_ACP_MCP_COMMAND="${BUZZ_ACP_MCP_COMMAND:-/opt/buzz-listener/run-mcp.sh}"
 export BUZZ_AGENT_PROVIDER="${BUZZ_AGENT_PROVIDER:-openai}"
 export OPENAI_COMPAT_BASE_URL="${OPENAI_COMPAT_BASE_URL:-http://127.0.0.1:4000/v1}"
-export OPENAI_COMPAT_MODEL="${OPENAI_COMPAT_MODEL:-goose}"
+export OPENAI_COMPAT_MODEL="${OPENAI_COMPAT_MODEL:-cloud}"
 export OPENAI_COMPAT_API="${OPENAI_COMPAT_API:-chat}"
 export BUZZ_AGENT_REQUIRE_REPLY="${BUZZ_AGENT_REQUIRE_REPLY:-1}"
 # buzz-agent only invokes _Stop when this allowlist is set. The multiplexer

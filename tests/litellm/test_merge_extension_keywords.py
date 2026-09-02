@@ -70,7 +70,7 @@ class RouterTargetsTest(unittest.TestCase):
         self.assertIn("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free", self.cfg)
         self.assertIn("openrouter/poolside/laguna-s-2.1:free", self.cfg)
 
-    def test_weak_models_not_on_goose_path(self):
+    def test_weak_models_not_on_router_path(self):
         simple = next(line for line in self.cfg.splitlines() if "SIMPLE:" in line)
         self.assertNotIn("gemini-lite", simple)
         self.assertNotIn("groq-20b", simple)

@@ -442,7 +442,7 @@ class TeamInstructionsTest(unittest.TestCase):
 class CloudRuntimeTest(unittest.TestCase):
     def test_overwrites_harness_and_keeps_stopped(self):
         row = {
-            "agent_command": "goose.exe",
+            "agent_command": "local-agent.exe",
             "agent_command_override": "x",
             "agent_args": ["--foo"],
             "acp_command": "buzz-acp",
@@ -458,7 +458,7 @@ class CloudRuntimeTest(unittest.TestCase):
         self.assertEqual(row["acp_command"], "")
         self.assertEqual(row["mcp_command"], "")
         self.assertEqual(row["agent_args"], [])
-        self.assertEqual(row["model"], "goose")
+        self.assertEqual(row["model"], "cloud")
         self.assertEqual(row["provider"], "litellm")
         self.assertFalse(row["is_active"])
         self.assertEqual(row["turn_timeout_seconds"], 320)

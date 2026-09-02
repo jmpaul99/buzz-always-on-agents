@@ -51,17 +51,6 @@ if (-not $env:LITELLM_MASTER_KEY) {
     }
 }
 
-if (-not $env:GITHUB_PERSONAL_ACCESS_TOKEN) {
-    $gooseYaml = Join-Path $env:APPDATA "Block\goose\config\config.yaml"
-    if (Test-Path $gooseYaml) {
-        $m = Select-String -Path $gooseYaml -Pattern "Bearer (github_pat_[A-Za-z0-9_]+)" -AllMatches
-        if ($m -and $m.Matches.Count -gt 0) {
-            $env:GITHUB_PERSONAL_ACCESS_TOKEN = $m.Matches[0].Groups[1].Value
-            Write-Host "imported GitHub PAT from Desktop Goose config (not printed). Move it out of config.yaml when you can."
-        }
-    }
-}
-
 Set-SecretValue "gemini-api-key" $env:GEMINI_API_KEY
 Set-SecretValue "groq-api-key" $env:GROQ_API_KEY
 Set-SecretValue "nvidia-nim-api-key" $env:NVIDIA_NIM_API_KEY

@@ -9,10 +9,10 @@ $script:C = @{
     GCP_REGION        = "us-central1"
     GCP_ZONE          = "us-central1-a"
     AR_REPO           = "buzz"
-    LITELLM_SERVICE   = "litellm-goose"
+    LITELLM_SERVICE   = "litellm-cloud"
     LISTENER_INSTANCE = "buzz-listener"
     LISTENER_SA       = "buzz-listener"
-    LITELLM_SA        = "litellm-goose"
+    LITELLM_SA        = "litellm-cloud"
     IAP_TAG           = "iap-ssh"
 }
 

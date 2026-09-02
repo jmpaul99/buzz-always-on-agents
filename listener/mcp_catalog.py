@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 SKIP = {"true", "false", "null", "none", "builtin", "platform", "stdio"}
-BROWSER_SLUGS = {"playwright", "chromedevtools", "goosedocs"}
+BROWSER_SLUGS = {"playwright", "chromedevtools"}
 MAX_ENABLED = 2
 EXTRA_PAGE_SIZE = 12
 ALLOWED_COMMANDS = {"npx", "uv", "uvx", "python", "python3", "github-mcp-server"}

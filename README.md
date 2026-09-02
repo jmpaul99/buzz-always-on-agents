@@ -22,7 +22,7 @@ thin control API :8743  → Desktop sidecar (roster / nsec only)
 | --- | --- | --- |
 | Relay | Buzz community WSS (`BUZZ_RELAY_URL`) | Host uptime |
 | Control API + buzz-acp | `e2-micro`, 30 GB standard PD, ephemeral IPv4 | Yes (IPv4 ~$3.65/mo) |
-| LiteLLM | Cloud Run `litellm-goose`, 1 vCPU / 2 Gi, min 0 | Per LLM call |
+| LiteLLM | Cloud Run `litellm-cloud`, 1 vCPU / 2 Gi, min 0 | Per LLM call |
 
 No Chromium/Playwright on this pass (RAM). 1 GiB is tight with many agents or several Node MCPs; bump to **e2-small (2 GiB)** if RSS OOMs. Still no browser.
 
@@ -55,11 +55,11 @@ The sidecars never talk to LiteLLM or Cloud Run. They IAP-tunnel to the micro **
 | `system_prompt` | Channel canvas (`buzz canvas`) | Card `avatar_url`, `persona_id` |
 | `respond_to` and `respond_to_allowlist` | Huddle instructions (owner-signed, per channel) | Extra MCPs (catalog file on the VM, not Desktop UI) |
 | `team_id`, team instruction text, display name, `channel_allowlist` | Thread / DM / channel history (`buzz messages get` or `thread`) | Local harness fields (cleared so this PC does not spawn a second buzz-acp) |
-| Cloud runtime labels on the card (`model=goose`, `provider=litellm`, provider backend) | Channel membership (buzz-acp join/leave live) | `is_active` / `runtime_pid` as a stop/start signal (cloud keeps listening) |
+| Cloud runtime labels on the card (`model=cloud`, `provider=litellm`, provider backend) | Channel membership (buzz-acp join/leave live) | `is_active` / `runtime_pid` as a stop/start signal (cloud keeps listening) |
 
 Memories, canvas, huddle, and recent channel or thread messages are **relay-native** (fetched by buzz-acp, not sidecar JSON). Team instruction text is denormalized onto each cloud agent (`/etc/buzz/<slug>.team`) so a `teams.json` save PUTs every agent on that team.
 
-**Cloud buzz-agent + LiteLLM are source of truth for model and harness.** The sidecar overwrites Desktop cards for cloud-tracked agents: provider backend, empty local `agent_command` / `acp_command` / `mcp_command`, `model=goose`, `provider=litellm`, `is_active=false`. Card labels `model=goose` / `provider=litellm` are the LiteLLM virtual model name (cosmetic; sync does not start the LLM). Switching **Run on → this computer** is reverted on the next sidecar cycle. Stopping the card is not undeploy.
+**Cloud buzz-agent + LiteLLM are source of truth for model and harness.** The sidecar overwrites Desktop cards for cloud-tracked agents: provider backend, empty local `agent_command` / `acp_command` / `mcp_command`, `model=cloud`, `provider=litellm`, `is_active=false`. Card labels `model=cloud` / `provider=litellm` are the LiteLLM virtual model name (cosmetic; sync does not start the LLM). Switching **Run on → this computer** is reverted on the next sidecar cycle. Stopping the card is not undeploy.
 
 On Windows, `windows/install-path.ps1` installs the PATH plugin **and** a hidden logon task `BuzzCloudSync` (`pythonw`, `IgnoreNew`). On macOS, `macos/install-path.sh` installs the same plugin as `~/.local/bin/buzz-backend-cloud` and LaunchAgent `xyz.block.buzz.cloud-sync`. One silent sidecar per machine. Logs: `%APPDATA%\xyz.block.buzz.app\agents\cloud-sync.log` (Windows) or `~/Library/Application Support/xyz.block.buzz.app/agents/cloud-sync.log` (macOS).
 
@@ -146,7 +146,7 @@ python -m unittest discover -s tests/litellm
 Smoke LiteLLM without making the service public:
 
 ```powershell
-gcloud run services proxy litellm-goose --region us-central1 --project your-gcp-project
+gcloud run services proxy litellm-cloud --region us-central1 --project your-gcp-project
 # other terminal:
 curl http://127.0.0.1:8080/v1/chat/completions ...
 ```
@@ -176,5 +176,5 @@ gcloud compute ssh buzz-listener --zone us-central1-a --tunnel-through-iap --com
 gcloud compute ssh buzz-listener --zone us-central1-a --tunnel-through-iap --command "sudo journalctl -u buzz-acp@YOURSLUG -n 80 --no-pager"
 
 # LiteLLM logs
-gcloud run services logs read litellm-goose --region us-central1 --limit 50
+gcloud run services logs read litellm-cloud --region us-central1 --limit 50
 ```

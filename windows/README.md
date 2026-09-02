@@ -66,7 +66,7 @@ Logs: `%APPDATA%\xyz.block.buzz.app\agents\cloud-sync.log`. State: `cloud-sync-s
 | `system_prompt`, team instruction text | Channel membership (Block relay) |
 | `respond_to`, allowlist, `channel_allowlist` | `runtime_pid`, start/stop timestamps |
 | `team_id`, display name, relay URL | Phone Buzz |
-| Cloud LiteLLM (`model=goose`, `provider=litellm`); `is_active=false` and harness cleared on every persist so Desktop cannot steal the nsec | |
+| Cloud LiteLLM (`model=cloud`, `provider=litellm`); `is_active=false` and harness cleared on every persist so Desktop cannot steal the nsec | |
 
 Deleting a Desktop card undeploys the GCP agent **and** removes the card on other Desktops. Stopping the card does **not**. Imported cards arrive as **Run on → cloud** and stopped.
 

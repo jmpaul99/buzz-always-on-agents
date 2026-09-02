@@ -59,7 +59,7 @@ Sidecar PUT JSON fields: `nsec` / `private_key_nsec`, `name`, `slug`, `system_pr
 
 [`mcp-catalog.json`](mcp-catalog.json) is not in Buzz Desktop. Native buzz-acp has one stdio MCP slot, so [`run-mcp.sh`](run-mcp.sh) attaches [`local-mcp/mcp_manager.py`](local-mcp/mcp_manager.py). That process proxies **always-on** `buzz-dev-mcp` (shell / files / `buzz` CLI) and can spawn extras.
 
-**Dropped:** `playwright`, `chromedevtools`, `goosedocs`. No Chromium on the micro.
+**Dropped:** `playwright`, `chromedevtools`. No Chromium on the micro.
 
 **Extras** (github, stripe, tavilywebsearch, googleadc, containeruse, linuxmcpserver, repomix, youtubetranscript) ship **disabled** in the committed catalog. Do not flip `enabled: true` there (LiteLLM keyword merge skips enabled extras). Agents call `mcp_list` / `mcp_enable` / `mcp_disable` / `mcp_register` / `mcp_tools`. Enablement is **per agent**, cap **2** extras (`MAX_ENABLED`; always-on is not in the cap), persisted in `/var/lib/buzz-listener/agents/<slug>/mcp-enabled.json` **only after spawn succeeds**. Failed extras are unpinned and show `status: failed` plus `last_error`. `mcp_register` appends `/etc/buzz/_mcp-overlay.json` (survives listener redeploy; the shipped catalog is overwritten). Extra tool names are `{slug}_{tool}` (a single underscore — buzz-agent rejects bare names containing `__`). `mcp_enable` spawns in the background so `shell` / `buzz messages send` still work this turn. `tools/list` advertises manager + always-on + one extra page (12); off-page extra names stay callable. `mcp_tools` pages the rest. Extra tokens are not in `shell` env.
 
@@ -71,7 +71,7 @@ A short skill is copied to `$WORKSPACE/agents/<slug>/.agents/skills/mcp-manager/
 
 ## LiteLLM
 
-`buzz-agent` uses `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_*` against `http://127.0.0.1:4000/v1` (`model=goose`, `OPENAI_COMPAT_API=chat`). The proxy mints a GCE identity token and forwards a buffered JSON body (`Content-Length`). `buzz-agent` hardcodes `stream: false`. Desktop Agent Activity is the native relay observer (`BUZZ_ACP_RELAY_OBSERVER=true` in `run-acp.sh`, matching Desktop remote `launch.policy_env`), not a local ACP stdio wrap.
+`buzz-agent` uses `BUZZ_AGENT_PROVIDER=openai` and `OPENAI_COMPAT_*` against `http://127.0.0.1:4000/v1` (`model=cloud`, `OPENAI_COMPAT_API=chat`). The proxy mints a GCE identity token and forwards a buffered JSON body (`Content-Length`). `buzz-agent` hardcodes `stream: false`. Desktop Agent Activity is the native relay observer (`BUZZ_ACP_RELAY_OBSERVER=true` in `run-acp.sh`, matching Desktop remote `launch.policy_env`), not a local ACP stdio wrap.
 
 `BUZZ_AGENT_REQUIRE_REPLY=1` so a turn with no `buzz messages send` / `reactions add` gets a reminder. `MCP_HOOK_SERVERS=*` so the multiplexer `_Stop` hook can object with the exact tool name (`run-mcp__shell` — bare `shell` is unknown). ACP Activity is not a channel post; `run-acp.sh` prepends that to the system prompt.
 

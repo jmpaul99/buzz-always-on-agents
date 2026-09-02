@@ -8,9 +8,9 @@ PowerShell 5.1 scripts. **Never commit `config.env` or the repo-root `.env`.** `
 | --- | --- |
 | Region / zone | `us-central1` / `us-central1-a` |
 | Artifact Registry | `buzz` (`us-central1-docker.pkg.dev/<project>/buzz`) |
-| LiteLLM service | `litellm-goose` |
+| LiteLLM service | `litellm-cloud` |
 | Listener VM | `buzz-listener` |
-| Service accounts | `buzz-listener`, `litellm-goose` |
+| Service accounts | `buzz-listener`, `litellm-cloud` |
 | IAP network tag | `iap-ssh` |
 
 ## Full deploy
@@ -73,7 +73,7 @@ If `LITELLM_MASTER_KEY` is unset: keep the existing secret, or generate `sk-` + 
 
 ## `deploy-litellm.ps1`
 
-Cloud Build (`cloudbuild-litellm.yaml`) → `…/buzz/litellm:latest` → Cloud Run `litellm-goose`. Then `roles/run.invoker` for the **listener** SA. Prints `LITELLM_URL`.
+Cloud Build (`cloudbuild-litellm.yaml`) → `…/buzz/litellm:latest` → Cloud Run `litellm-cloud`. Then `roles/run.invoker` for the **listener** SA. Prints `LITELLM_URL`.
 
 ## `deploy-listener.ps1`
 

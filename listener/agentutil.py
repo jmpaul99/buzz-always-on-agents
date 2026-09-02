@@ -568,7 +568,7 @@ def apply_cloud_team_instructions(teams: list[dict[str, Any]], cloud_agents: lis
     return changed
 
 
-CLOUD_MODEL = "goose"
+CLOUD_MODEL = "cloud"
 CLOUD_PROVIDER = "litellm"
 HARNESS_CLEAR = ("agent_command", "agent_command_override", "acp_command", "mcp_command")
 DEFAULT_TURN_TIMEOUT_SECONDS = 320
